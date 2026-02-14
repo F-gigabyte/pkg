@@ -1,0 +1,136 @@
+
+There are no discarded input sections
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+LOAD /tmp/pkg_han/kernel
+LOAD /tmp/pkg_han/test_driver
+
+kernel.bootloader
+                0x10000000      0x100
+ *(kernel.bootloader)
+ kernel.bootloader
+                0x10000000      0x100 /tmp/pkg_han/kernel
+
+kernel.text.vectors
+                0x10000100       0xc0
+ *(kernel.text.vectors)
+ kernel.text.vectors
+                0x10000100       0xc0 /tmp/pkg_han/kernel
+
+kernel.text     0x100001c0     0xf92e
+                0x10015700                        main = .
+ *(kernel.text)
+ kernel.text    0x100001c0     0xf92e /tmp/pkg_han/kernel
+
+kernel.rodata   0x1000faf0     0x48c8
+ *(kernel.rodata)
+ kernel.rodata  0x1000faf0     0x48c8 /tmp/pkg_han/kernel
+
+kernel.data     0x20002000     0x129c load address 0x100143b8
+ *(kernel.data)
+ kernel.data    0x20002000     0x129c /tmp/pkg_han/kernel
+
+../small_os_drivers/target/thumbv6m-none-eabi/debug/test_driver.text
+                0x10015700        0x8
+                0x10015700                        main = .
+ *(../small_os_drivers/target/thumbv6m-none-eabi/debug/test_driver.text)
+ ../small_os_drivers/target/thumbv6m-none-eabi/debug/test_driver.text
+                0x10015700        0x8 /tmp/pkg_han/test_driver
+
+.glue_7         0x10015708        0x0
+ .glue_7        0x10015708        0x0 linker stubs
+
+.glue_7t        0x10015708        0x0
+ .glue_7t       0x10015708        0x0 linker stubs
+
+.vfp11_veneer   0x10015708        0x0
+ .vfp11_veneer  0x10015708        0x0 linker stubs
+
+.v4_bx          0x10015708        0x0
+ .v4_bx         0x10015708        0x0 linker stubs
+
+.iplt           0x10015708        0x0
+ .iplt          0x10015708        0x0 /tmp/pkg_han/test_driver
+
+.igot.plt       0x10015708        0x0
+ .igot.plt      0x10015708        0x0 /tmp/pkg_han/test_driver
+
+../small_os_drivers/target/thumbv6m-none-eabi/debug/test_driver.ARM.exidx.text.main
+                0x10015800        0x8
+ *(../small_os_drivers/target/thumbv6m-none-eabi/debug/test_driver.ARM.exidx.text.main)
+ ../small_os_drivers/target/thumbv6m-none-eabi/debug/test_driver.ARM.exidx.text.main
+                0x10015800        0x8 /tmp/pkg_han/test_driver
+
+.rel.dyn        0x10015808        0x0
+ .rel.iplt      0x10015808        0x0 /tmp/pkg_han/test_driver
+
+program_table   0x10015654       0x70
+ /tmp/pkg_han/prog_table.o()
+ .data          0x10015654       0x70 /tmp/pkg_han/prog_table.o
+                0x10015654                _binary__tmp_pkg_han_prog_table_bin_start
+                0x100156c4                _binary__tmp_pkg_han_prog_table_bin_end
+OUTPUT(small_os elf32-littlearm)
+LOAD linker stubs
+LOAD /tmp/pkg_han/prog_table.o
+
+.debug_abbrev   0x00000000     0xa37a
+ .debug_abbrev  0x00000000     0xa261 /tmp/pkg_han/kernel
+ .debug_abbrev  0x0000a261      0x119 /tmp/pkg_han/test_driver
+
+.debug_info     0x00000000    0xe5b1a
+ .debug_info    0x00000000    0xe56ac /tmp/pkg_han/kernel
+ .debug_info    0x000e56ac      0x46e /tmp/pkg_han/test_driver
+
+.debug_aranges  0x00000000     0xbdd8
+ .debug_aranges
+                0x00000000     0xbdb0 /tmp/pkg_han/kernel
+ .debug_aranges
+                0x0000bdb0       0x28 /tmp/pkg_han/test_driver
+
+.debug_ranges   0x00000000    0x21748
+ .debug_ranges  0x00000000    0x21730 /tmp/pkg_han/kernel
+ .debug_ranges  0x00021730       0x18 /tmp/pkg_han/test_driver
+
+.debug_str      0x00000000    0xc8b3d
+ .debug_str     0x00000000    0xc8b3d /tmp/pkg_han/kernel
+                              0xd01d8 (size before relaxing)
+ .debug_str     0x000c8b3d      0x47c /tmp/pkg_han/test_driver
+
+.comment        0x00000000       0x92
+ .comment       0x00000000       0x92 /tmp/pkg_han/kernel
+                                 0x93 (size before relaxing)
+ .comment       0x00000092       0x35 /tmp/pkg_han/test_driver
+
+.ARM.attributes
+                0x00000000       0x2c
+ .ARM.attributes
+                0x00000000       0x32 /tmp/pkg_han/kernel
+ .ARM.attributes
+                0x00000032       0x32 /tmp/pkg_han/test_driver
+
+.note.GNU-stack
+                0x00000000        0x0
+ .note.GNU-stack
+                0x00000000        0x0 /tmp/pkg_han/test_driver
+
+.debug_frame    0x00000000    0x28e30
+ .debug_frame   0x00000000    0x28de4 /tmp/pkg_han/kernel
+ .debug_frame   0x00028de4       0x4c /tmp/pkg_han/test_driver
+
+.debug_line     0x00000000    0x64042
+ .debug_line    0x00000000    0x63fe3 /tmp/pkg_han/kernel
+ .debug_line    0x00063fe3       0x5f /tmp/pkg_han/test_driver
+
+.debug_loc      0x00000000     0x283e
+ .debug_loc     0x00000000     0x283e /tmp/pkg_han/kernel
+
+.debug_line_str
+                0x00000000       0x61
+ .debug_line_str
+                0x00000000       0x61 /tmp/pkg_han/kernel
