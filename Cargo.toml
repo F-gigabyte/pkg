@@ -5,4 +5,6 @@ edition = "2024"
 
 [dependencies]
 object = "0.38.1"
+serde = {version = "1.0.228", features = ["std", "derive", "serde_derive"]}
+toml = "1.0.1"
 whoami = "2.1.1"
