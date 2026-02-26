@@ -36,8 +36,20 @@ impl Program {
     pub fn serialise(&self) -> Result<Vec<u8>, PkgError> {
         let mut res = Vec::new();
         res.extend_from_slice(&(self.priority as u32 | ((self.driver as u32) << 16) | ((self.inter as u32) << 8)).to_le_bytes());
-        res.extend_from_slice(&self.sp.ok_or(PkgError::NoProgramStack(self.name.to_string()))?.to_le_bytes());
-        res.extend_from_slice(&self.entry.ok_or(PkgError::NoProgramEntry(self.name.to_string()))?.to_le_bytes());
+        res.extend_from_slice(&self.sp.ok_or(
+                PkgError::NoProgramStack {
+                    name: self.name.to_string()
+                }
+            )?
+            .to_le_bytes()
+        );
+        res.extend_from_slice(&self.entry.ok_or(
+                PkgError::NoProgramEntry {
+                    name: self.name.to_string()
+                }
+            )?
+            .to_le_bytes()
+        );
         for region in &self.regions {
             res.extend(region.serialise().iter());
         }

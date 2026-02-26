@@ -686,7 +686,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     if args.len() < 4 || args.len() > 5 {
         return Err(
             PkgError::InvalidArgs {
-                name: args[0]
+                name: args[0].clone()
             }
         );
     }
@@ -699,7 +699,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
             _ => {
                 return Err(
                     PkgError::InvalidArgs {
-                        name: args[0]
+                        name: args[0].clone()
                     }
                 );
             }
@@ -710,7 +710,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     if args[config_index + 1] != "-o" {
         return Err(
             PkgError::InvalidArgs {
-                name: args[0]
+                name: args[0].clone()
             }
         );
     }
