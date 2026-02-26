@@ -3,6 +3,8 @@ use serde::Deserialize;
 
 use object::{Endianness, Object, ObjectKind, ObjectSection, ObjectSymbol, SectionIndex, StringTable, elf::{SHF_ALLOC, SHF_EXECINSTR, SHF_WRITE, STT_FUNC}, read::elf::{ElfFile, ElfFile32, FileHeader, SectionHeader}};
 
+use ansi_term::Color::Red;
+
 use crate::{async_queue::AsyncQueue, drivers::find_driver, errors::PkgError, program::Program, region::Region, region_attr::RegionAttr, section_attr::SectionAttr};
 
 pub mod drivers;
@@ -1356,7 +1358,7 @@ fn main() {
     match run(args) {
         Ok(()) => {},
         Err(err) => {
-            eprintln!("{}", err);
+            eprintln!("{}", Red.paint(err.to_string()));
             exit(1);
         }
     }
