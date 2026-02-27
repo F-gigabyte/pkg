@@ -20,6 +20,41 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn new(
+        name: String,
+        priority: u8,
+        driver: u16,
+        inter: u8,
+        num_sync_queues: u32,
+        num_sync_endpoints: u32,
+        num_async_queues: u32,
+        num_async_endpoints: u32,
+        regions: [Region; 8]
+    ) -> Self {
+
+        Self { 
+            name, 
+            priority, 
+            driver, 
+            inter, 
+            sp: None, 
+            entry: None, 
+            regions, 
+            num_sync_queues, 
+            num_sync_endpoints, 
+            sync_queues: 0, 
+            sync_endpoints: 0, 
+            num_async_queues, 
+            num_async_endpoints, 
+            async_queues: 0, 
+            async_endpoints: 0 
+        }
+    }
+
+    pub fn is_reserved_name(name: &str) -> bool {
+        matches!(name, "kernel" | "sync" | "async" | "program_table" | "procs" | "")
+    }
+
     pub fn find_empty_region(&mut self) -> Option<&mut Region> {
         for region in self.regions.iter_mut() {
             if region.virt_addr & 1 == 0 {
