@@ -1,6 +1,9 @@
 use std::{cmp::Ordering, collections::{HashMap, VecDeque}};
 
-use crate::{BOOTLOADER_ADDR, Section, VECTORS_ADDR, errors::PkgError, program::Program, region::Region, region_attr::RegionAttr};
+use crate::{Section, errors::PkgError, program::Program, region::Region, region_attr::RegionAttr};
+
+const BOOTLOADER_ADDR: usize = 0x10000000;
+const VECTORS_ADDR: usize = 0x10000000 + 256;
 
 pub struct MemMap {
     name: &'static str,
