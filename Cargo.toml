@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 ansi_term = "0.12.1"
+capitalize = "0.3.4"
 object = "0.38.1"
 serde = {version = "1.0.228", features = ["std", "derive", "serde_derive"]}
 toml = "1.0.1"

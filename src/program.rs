@@ -1,3 +1,5 @@
+use capitalize::Capitalize;
+
 use crate::{errors::PkgError, region::Region};
 
 #[derive(Debug)]
@@ -97,5 +99,46 @@ impl Program {
         res.extend_from_slice(&self.async_queues.to_le_bytes());
         res.extend_from_slice(&self.async_endpoints.to_le_bytes());
         Ok(res)
+    }
+
+    pub fn display(&self, indent: usize) {
+        let indent_len = indent;
+        let indent = "\t".repeat(indent);
+        println!("{}{}", indent, self.name.capitalize());
+        println!("{}\tPriority: {}", indent, self.priority);
+        if self.driver != 0 {
+            println!("{}\tDriver: {}", indent, self.driver);
+        }
+        if self.inter != 0xff {
+            println!("{}\tInterrupt: {}", indent, self.inter);
+        }
+        if let Some(sp) = self.sp {
+            println!("{}\tStack Pointer: 0x{:x}", indent, sp)
+        }
+        if let Some(entry) = self.entry {
+            println!("{}\tEntry: 0x{:x}", indent, entry)
+        }
+        for (i, region) in self.regions.iter().enumerate() {
+            if region.virt_addr & Region::ENABLE_MASK != 0 {
+                println!("{}\tRegion {}", indent, i);
+                region.display(indent_len + 2);
+            }
+        }
+        println!("{}\tNum. Sync Queues: {}", indent, self.num_sync_queues);
+        println!("{}\tNum. Async Queues: {}", indent, self.num_async_queues);
+        println!("{}\tNum. Sync Endpoints: {}", indent, self.num_sync_endpoints);
+        println!("{}\tNum. Async Endpoints: {}", indent, self.num_async_endpoints);
+        if self.num_sync_queues > 0 {
+            println!("{}\tSync Queues Address: 0x{:x}", indent, self.sync_queues);
+        }
+        if self.num_async_queues > 0 {
+            println!("{}\tAsync Queues Address: 0x{:x}", indent, self.async_queues);
+        }
+        if self.num_sync_endpoints > 0 {
+            println!("{}\tSync Endpoints Address: 0x{:x}", indent, self.sync_endpoints);
+        }
+        if self.num_async_endpoints > 0 {
+            println!("{}\tAsync Endpoints Address: 0x{:x}", indent, self.async_endpoints);
+        }
     }
 }

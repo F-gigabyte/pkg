@@ -22,7 +22,7 @@ impl MemMap {
         }
     }
 
-    pub fn allocate(&mut self, alloc: &Alloc) -> Result<usize, PkgError> {
+    fn allocate(&mut self, alloc: &Alloc) -> Result<usize, PkgError> {
         let mut suggest = None;
         let mut overflow = 0;
         for i in 0..self.regions.len() {
@@ -85,7 +85,7 @@ impl MemMap {
         }
     }
 
-    pub fn reserve(&mut self, block: Block) -> Result<(), Block> {
+    fn reserve(&mut self, block: Block) -> Result<(), Block> {
         for i in 0..self.regions.len() {
             if self.regions[i].lower <= block.lower && self.regions[i].upper >= block.upper && self.regions[i].region == "free" {
                 let mut i = i;
@@ -117,10 +117,11 @@ impl MemMap {
         Err(block)
     }
 
-    pub fn display(&self) {
-        println!("{}", self.name);
+    pub fn display(&self, indent: usize) {
+        let indent = "\t".repeat(indent).to_string();
+        println!("{}{}", indent, self.name);
         for block in &self.regions {
-            println!("\t0x{:x} -> 0x{:x}: {}", block.lower, block.upper, block.region);
+            println!("{}\t0x{:x} -> 0x{:x}: {}", indent, block.lower, block.upper, block.region);
         }
     }
 }
@@ -342,8 +343,8 @@ pub fn do_allocs(
                 phys_addr = Some(BOOTLOADER_ADDR);
             } else if alloc_type == AllocType::Kernel && alloc.region == ".text.vectors" {
                 let block = Block {
-                    lower: BOOTLOADER_ADDR, 
-                    upper: BOOTLOADER_ADDR + alloc.size, 
+                    lower: VECTORS_ADDR, 
+                    upper: VECTORS_ADDR + alloc.size, 
                     region: format!("{}{} ({})", alloc.name, alloc.region, alloc.attr)
                 };
                 if let Err(_) = flash.reserve(block) { 

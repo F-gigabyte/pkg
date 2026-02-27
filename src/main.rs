@@ -413,8 +413,8 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         // based on answer by embradded on https://stackoverflow.com/questions/68622938/new-versions-of-ld-cannot-take-elf-files-as-input-to-link accessed 11/02/2026
     }
     
-    ram.display();
-    flash.display();
+    ram.display(0);
+    flash.display(0);
     
     let mut sync_endpoints_vec: Vec<_> = sync_endpoints_offsets.iter().collect();
     sync_endpoints_vec.sort_by(|a, b| -> Ordering {
@@ -650,7 +650,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         }
     )?;
     for program in programs {
-        println!("{:#x?}", program);
+        program.display(0);
     }
     Ok(())
 }

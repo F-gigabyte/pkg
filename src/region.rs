@@ -1,3 +1,5 @@
+use crate::section_attr::SectionAttr;
+
 #[derive(Debug)]
 pub struct Region {
     pub phys_addr: u32,
@@ -18,7 +20,11 @@ impl Region {
     pub const ADDR_MASK: u32 = 0xffffff00;
 
     pub const fn default() -> Self {
-        Self { phys_addr: 0, virt_addr: 0, len: 0 }
+        Self { 
+            phys_addr: 0, 
+            virt_addr: 0, 
+            len: 0 
+        }
     }
 
     pub fn serialise(&self) -> Vec<u8> {
@@ -31,6 +37,22 @@ impl Region {
 
     pub const fn get_region_size() -> usize {
         std::mem::size_of::<u32>() * 3
+    }
+
+    pub fn display(&self, indent: usize) {
+        let indent = "\t".repeat(indent).to_string();
+        println!("{}Physical: 0x{:x} -> 0x{:x}", indent, self.phys_addr, self.phys_addr + self.len);
+        let virt_addr = self.virt_addr & Self::ADDR_MASK;
+        println!("{}Load: 0x{:x} -> 0x{:x}", indent, virt_addr, virt_addr + self.len);
+        let attr = ((self.virt_addr & Self::PERM_MASK) >> Self::PERM_SHIFT) as u8;
+        let attr = SectionAttr::new(attr & SectionAttr::READ_MASK != 0, attr & SectionAttr::WRITE_MASK != 0, attr & SectionAttr::EXEC_MASK != 0);
+        println!("{}Perm: {}", indent, attr);
+        if self.virt_addr & Self::DEVICE_MASK != 0 {
+            println!("{}Device Memory", indent);
+        }
+        if self.virt_addr & Self::ZERO_MASK != 0 {
+            println!("{}Zero Init", indent);
+        }
     }
 }
 
