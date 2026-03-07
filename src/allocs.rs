@@ -141,13 +141,13 @@ pub struct Alloc {
     pub name: String,
     pub region: String,
     pub queue: bool,
-    pub need_region: bool,
     pub attr: RegionAttr,
     pub load: bool,
     pub store: bool,
     pub entry_addr: Option<usize>,
     pub size: usize,
-    pub alignment: usize
+    pub actual_size: usize,
+    pub alignment: usize,
 }
 
 impl PartialOrd for Alloc {
@@ -227,7 +227,8 @@ struct PartialAllocInfo {
     sync_endpoints_phys: Option<usize>,
     async_endpoints_phys: Option<usize>,
     proc_virt: Option<usize>,
-    proc_len: Option<usize>
+    proc_len: Option<usize>,
+    codes: Option<usize>
 }
 
 impl PartialAllocInfo {
@@ -246,7 +247,8 @@ impl PartialAllocInfo {
             sync_endpoints_phys: None, 
             async_endpoints_phys: None, 
             proc_virt: None, 
-            proc_len: None 
+            proc_len: None,
+            codes: None,
         }
     }
 
@@ -266,6 +268,7 @@ impl PartialAllocInfo {
             async_endpoints_phys: self.async_endpoints_phys.unwrap(),
             proc_virt: self.proc_virt.unwrap(),
             proc_len: self.proc_len.unwrap(),
+            codes: self.codes.unwrap()
         })
     }
 }
@@ -284,16 +287,18 @@ pub struct AllocInfo {
     pub sync_endpoints_phys: usize,
     pub async_endpoints_phys: usize,
     pub proc_virt: usize,
-    pub proc_len: usize
+    pub proc_len: usize,
+    pub codes: usize
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum AllocType {
+pub enum AllocType {
     Kernel,
     Sync,
     Async,
     ProgramTable,
     Procs,
+    Codes,
     Other
 }
 
@@ -305,6 +310,7 @@ impl AllocType {
             "async" => Self::Async,
             "program_table" => Self::ProgramTable,
             "procs" => Self::Procs,
+            "codes" => Self::Codes,
             _ => Self::Other
         }
     }
@@ -315,9 +321,8 @@ pub fn do_allocs(
     ram: &mut MemMap, 
     flash: &mut MemMap, 
     sections: &mut Vec<Section>, 
-    programs: &mut HashMap<String, Program>
+    programs: &mut HashMap<String, Program>,
     ) -> Result<AllocInfo, PkgError> {
-
     let mut alloc_info = PartialAllocInfo::new();
     for mut alloc in allocs {
         let alloc_type = AllocType::new(&alloc.name);
@@ -366,11 +371,13 @@ pub fn do_allocs(
             }
         }
         if virt_addr.is_none() && phys_addr.is_none() {
+            println!("Skipping unneeded section");
             continue;
         }
-        let virt_addr = virt_addr.unwrap_or_else(|| phys_addr.unwrap());
-        let phys_addr = phys_addr.unwrap_or(virt_addr);
+        let runtime_addr = virt_addr.unwrap_or_else(|| phys_addr.unwrap());
         if alloc.region != ".stack" && !alloc.queue && alloc_type != AllocType::ProgramTable {
+            let virt_addr = virt_addr.unwrap_or_else(|| phys_addr.unwrap());
+            let phys_addr = phys_addr.unwrap_or(virt_addr);
             let alloc_sec = Section {
                 name,
                 phys_addr,
@@ -380,74 +387,88 @@ pub fn do_allocs(
         }
         match alloc_type {
             AllocType::Other => {
-                if alloc.need_region {
-                    if let Some(program) = programs.get_mut(&alloc.name) {
-                        let sec = program.find_empty_region().ok_or(
-                            PkgError::TooManySections {
-                                name: alloc.name
-                            }
-                        )?;
-                        sec.len = alloc.size as u32;
-                        sec.phys_addr = phys_addr as u32;
-                        let zero = if alloc.region == ".bss" {
-                            Region::ZERO_MASK
-                        } else {
-                            0
-                        };
-                        sec.virt_addr = virt_addr as u32 | ((alloc.attr as u32) << Region::PERM_SHIFT) | Region::ENABLE_MASK | zero;
-                        if alloc.region == ".stack" {
-                            program.sp = Some(virt_addr as u32 + alloc.size as u32);
+                if let Some(program) = programs.get_mut(&alloc.name) {
+                    let (index, sec) = program.find_empty_region().ok_or(
+                        PkgError::TooManySections {
+                            name: alloc.name.to_string()
                         }
-                        if let Some(entry_addr) = entry_addr {
-                            program.entry = Some(entry_addr as u32 + virt_addr as u32);
-                        }
+                    )?;
+                    sec.name = Some(alloc.region.to_string());
+                    let zero = if alloc.region == ".bss" {
+                        Region::ZERO_MASK
                     } else {
-                        return Err(
-                            PkgError::NoProgram {
-                                name: alloc.name
-                            }
-                        );
+                        0
+                    };
+                    let mut region_type = 0;
+                    if phys_addr.is_some() {
+                        region_type |= Region::PHYSICAL_MASK;
                     }
+                    if virt_addr.is_some() {
+                        region_type |= Region::VIRTUAL_MASK;
+                    }
+                    sec.len = ((alloc.size.ilog2() - 1) as u32) << Region::LEN_SHIFT | 
+                        ((alloc.attr as u32) << Region::PERM_SHIFT) | 
+                        Region::ENABLE_MASK | 
+                        zero | 
+                        region_type;
+                    sec.actual_len = alloc.actual_size as u32;
+                    sec.phys_addr = phys_addr.unwrap_or(0) as u32;
+                    sec.virt_addr = virt_addr.unwrap_or(0) as u32;
+                    if alloc.region == ".stack" {
+                        program.sp = Some(index as u32);
+                    }
+                    if let Some(entry_addr) = entry_addr {
+                        program.entry = Some(entry_addr as u32 + runtime_addr as u32);
+                    }
+                } else {
+                    return Err(
+                        PkgError::NoProgram {
+                            name: alloc.name
+                        }
+                    );
                 }
+            },
+            AllocType::Codes => {
+                alloc_info.codes = Some(runtime_addr);
             },
             AllocType::Kernel => {
                 if let Some(entry_addr) = entry_addr {
-                    alloc_info.kernel_entry = Some(entry_addr + virt_addr);
+                    alloc_info.kernel_entry = Some(entry_addr + runtime_addr);
                 }
                 if alloc.region == ".stack" {
-                    alloc_info.kernel_stack = Some(virt_addr + alloc.size);
+                    alloc_info.kernel_stack = Some(runtime_addr + alloc.size);
                 }
             },
             AllocType::ProgramTable => {
-                alloc_info.prog_table_phys = Some(phys_addr)
+                alloc_info.prog_table_phys = Some(runtime_addr)
             },
             AllocType::Sync => {
                 match alloc.region.as_ref() {
                     ".queues" => {
-                        alloc_info.sync_queues_virt = Some(virt_addr);
+                        alloc_info.sync_queues_virt = Some(runtime_addr);
                         alloc_info.sync_queues_len = Some(alloc.size);
                     }
-                    ".endpoints" => alloc_info.sync_endpoints_phys = Some(phys_addr),
+                    ".endpoints" => alloc_info.sync_endpoints_phys = Some(runtime_addr),
                     _ => {}
                 }
             },
             AllocType::Async => {
                 match alloc.region.as_ref() {
                     ".queues" => {
-                        alloc_info.async_queues_virt = Some(virt_addr);
-                        alloc_info.async_queues_phys = Some(phys_addr);
+                        alloc_info.async_queues_virt = Some(virt_addr.unwrap());
+                        alloc_info.async_queues_phys = Some(phys_addr.unwrap());
                         alloc_info.async_queues_len = Some(alloc.size);
                     },
-                    ".endpoints" => alloc_info.async_endpoints_phys = Some(phys_addr),
+                    ".endpoints" => alloc_info.async_endpoints_phys = Some(runtime_addr),
                     ".messages" => {
-                        alloc_info.messages_virt = Some(virt_addr);
+                        alloc_info.messages_virt = Some(runtime_addr);
                         alloc_info.messages_len = Some(alloc.size);
                     }
                     _ => {}
                 }
             },
             AllocType::Procs => {
-                alloc_info.proc_virt = Some(virt_addr);
+                alloc_info.proc_virt = Some(runtime_addr);
                 alloc_info.proc_len = Some(alloc.size);
             }
         }
@@ -462,7 +483,7 @@ pub fn default_allocs(
     async_queues_size: usize,
     sync_endpoints_size: usize,
     async_endpoints_size: usize,
-    messages_size: usize
+    messages_size: usize,
     ) -> VecDeque<Alloc> {
     
     let mut allocs = VecDeque::new();
@@ -472,13 +493,13 @@ pub fn default_allocs(
         name: "program_table".to_string(),
         region: ".program_table".to_string(),
         queue: false,
-        need_region: false,
         attr: RegionAttr::R,
         load: false,
         store: true,
         entry_addr: None,
         size: prog_table_size,
-        alignment: 4
+        actual_size: prog_table_size,
+        alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
     allocs.insert(index, alloc);
@@ -488,13 +509,13 @@ pub fn default_allocs(
         name: "procs".to_string(),
         region: ".procs".to_string(),
         queue: true,
-        need_region: false,
         attr: RegionAttr::RW,
         load: true,
         store: false,
         entry_addr: None,
         size: procs_size,
-        alignment: 4
+        actual_size: procs_size,
+        alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
     allocs.insert(index, alloc);
@@ -504,13 +525,13 @@ pub fn default_allocs(
         name: "sync".to_string(),
         region: ".queues".to_string(),
         queue: true,
-        need_region: false,
         attr: RegionAttr::RW,
         load: true,
         store: false,
         entry_addr: None,
         size: sync_queues_size,
-        alignment: 4
+        actual_size: sync_queues_size,
+        alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
     allocs.insert(index, alloc);
@@ -520,13 +541,13 @@ pub fn default_allocs(
         name: "async".to_string(),
         region: ".queues".to_string(),
         queue: true,
-        need_region: false,
         attr: RegionAttr::RW,
         load: true,
         store: true,
         entry_addr: None,
         size: async_queues_size,
-        alignment: 4
+        actual_size: async_queues_size,
+        alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
     allocs.insert(index, alloc);
@@ -536,13 +557,13 @@ pub fn default_allocs(
         name: "sync".to_string(),
         region: ".endpoints".to_string(),
         queue: true,
-        need_region: false,
         attr: RegionAttr::R,
         load: false,
         store: true,
         entry_addr: None,
         size: sync_endpoints_size,
-        alignment: 4
+        actual_size: sync_endpoints_size,
+        alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
     allocs.insert(index, alloc);
@@ -552,13 +573,13 @@ pub fn default_allocs(
         name: "async".to_string(),
         region: ".endpoints".to_string(),
         queue: true,
-        need_region: false,
         attr: RegionAttr::R,
         load: false,
         store: true,
         entry_addr: None,
         size: async_endpoints_size,
-        alignment: 4
+        actual_size: async_endpoints_size,
+        alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
     allocs.insert(index, alloc);
@@ -568,16 +589,34 @@ pub fn default_allocs(
         name: "async".to_string(),
         region: ".messages".to_string(),
         queue: false,
-        need_region: false,
         attr: RegionAttr::RW,
         load: true,
         store: false,
         entry_addr: None,
         size: messages_size,
-        alignment: 4
+        actual_size: messages_size,
+        alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
     allocs.insert(index, alloc);
 
     allocs
+}
+
+pub fn add_error_codes(allocs: &mut VecDeque<Alloc>, codes_size: usize) {
+    // codes alloc
+    let alloc = Alloc {
+        name: "codes".to_string(),
+        region: ".codes".to_string(),
+        queue: false,
+        attr: RegionAttr::RW,
+        load: true,
+        store: false,
+        entry_addr: None,
+        size: codes_size,
+        actual_size: codes_size,
+        alignment: 4,
+    };
+    let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
+    allocs.insert(index, alloc);
 }

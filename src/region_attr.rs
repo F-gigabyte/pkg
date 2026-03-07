@@ -4,9 +4,9 @@ use crate::section_attr::SectionAttr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionAttr {
-    RX = 0b101,
-    R = 0b100,
-    RW = 0b110
+    RX = 0b01,
+    R = 0b00,
+    RW = 0b10
 }
 
 impl TryFrom<SectionAttr> for RegionAttr {

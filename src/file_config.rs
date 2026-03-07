@@ -49,10 +49,12 @@ pub struct ProgramConfig {
     pub num_sync_queues: u32,
     pub async_queues: Vec<usize>,
     pub sync_endpoints: Vec<Endpoint>,
-    pub async_endpoints: Vec<Endpoint>
+    pub async_endpoints: Vec<Endpoint>,
+    pub block_len: u32,
 }
 
 pub struct LoadedConfig<'a> {
     pub filename: String,
+    pub block_len: u32,
     pub data: ElfFile32<'a>,
 }

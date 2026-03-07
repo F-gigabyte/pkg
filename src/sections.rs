@@ -145,6 +145,12 @@ pub fn create_link_file(
     );
     link_data = format!(
         "{}
+        \t__scratch_data = 0x{:x};", 
+        link_data, 
+        alloc_info.codes
+    );
+    link_data = format!(
+        "{}
         \t__kernel_stack = 0x{:x};
         }}
         ", 

@@ -18,7 +18,8 @@ pub struct Program {
     pub num_async_queues: u32,
     pub num_async_endpoints: u32,
     pub async_queues: u32,
-    pub async_endpoints: u32
+    pub async_endpoints: u32,
+    pub block_len: u32
 }
 
 impl Program {
@@ -31,7 +32,8 @@ impl Program {
         num_sync_endpoints: u32,
         num_async_queues: u32,
         num_async_endpoints: u32,
-        regions: [Region; 8]
+        regions: [Region; 8],
+        block_len: u32
     ) -> Self {
 
         Self { 
@@ -49,25 +51,26 @@ impl Program {
             num_async_queues, 
             num_async_endpoints, 
             async_queues: 0, 
-            async_endpoints: 0 
+            async_endpoints: 0,
+            block_len 
         }
     }
 
     pub fn is_reserved_name(name: &str) -> bool {
-        matches!(name, "kernel" | "sync" | "async" | "program_table" | "procs" | "")
+        matches!(name, "kernel" | "sync" | "async" | "program_table" | "procs" | "" | "codes")
     }
 
-    pub fn find_empty_region(&mut self) -> Option<&mut Region> {
-        for region in self.regions.iter_mut() {
-            if region.virt_addr & 1 == 0 {
-                return Some(region);
+    pub fn find_empty_region(&mut self) -> Option<(usize, &mut Region)> {
+        for (i, region) in self.regions.iter_mut().enumerate() {
+            if !region.is_enabled() {
+                return Some((i, region));
             }
         }
         None
     }
 
     pub const fn get_prog_size() -> usize {
-        Region::get_region_size() * 8 + 11 * std::mem::size_of::<u32>()
+        Region::get_region_size() * 8 + 12 * std::mem::size_of::<u32>()
     }
 
     pub fn serialise(&self) -> Result<Vec<u8>, PkgError> {
@@ -98,6 +101,7 @@ impl Program {
         res.extend_from_slice(&self.num_async_endpoints.to_le_bytes());
         res.extend_from_slice(&self.async_queues.to_le_bytes());
         res.extend_from_slice(&self.async_endpoints.to_le_bytes());
+        res.extend_from_slice(&self.block_len.to_le_bytes());
         Ok(res)
     }
 
@@ -113,13 +117,13 @@ impl Program {
             println!("{}\tInterrupt: {}", indent, self.inter);
         }
         if let Some(sp) = self.sp {
-            println!("{}\tStack Pointer: 0x{:x}", indent, sp)
+            println!("{}\tStack Region: {}", indent, sp)
         }
         if let Some(entry) = self.entry {
             println!("{}\tEntry: 0x{:x}", indent, entry)
         }
         for (i, region) in self.regions.iter().enumerate() {
-            if region.virt_addr & Region::ENABLE_MASK != 0 {
+            if region.is_enabled() {
                 println!("{}\tRegion {}", indent, i);
                 region.display(indent_len + 2);
             }
@@ -140,5 +144,6 @@ impl Program {
         if self.num_async_endpoints > 0 {
             println!("{}\tAsync Endpoints Address: 0x{:x}", indent, self.async_endpoints);
         }
+        println!("{}\tBlock Length: {}", indent, self.block_len);
     }
 }

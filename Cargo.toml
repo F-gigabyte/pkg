@@ -10,3 +10,5 @@ object = "0.38.1"
 serde = {version = "1.0.228", features = ["std", "derive", "serde_derive"]}
 toml = "1.0.1"
 whoami = "2.1.1"
+crc32 = { git = "ssh://git@github.com/F-gigabyte/crc32.git" }
+hamming = { git = "ssh://git@github.com/F-gigabyte/hamming.git" }

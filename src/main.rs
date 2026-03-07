@@ -4,7 +4,7 @@ use object::read::elf::ElfFile;
 
 use ansi_term::Color::Red;
 
-use crate::{allocs::{MemMap, default_allocs, do_allocs}, args::Args, cmds::check_cmd, drivers::find_driver, elf::get_file_regions, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
+use crate::{allocs::{MemMap, add_error_codes, default_allocs, do_allocs}, args::Args, cmds::check_cmd, drivers::find_driver, elf::{add_final_crcs, get_file_regions}, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
 
 pub mod drivers;
 pub mod queues;
@@ -29,7 +29,6 @@ const RAM_START: usize = 0x20000000;
 const RAM_LEN: usize = 264 * 1024;
 
 fn run(args: Vec<String>) -> Result<(), PkgError> {
-
     let args = Args::parse(&args)?;
     let config = FileConfig::parse(args.config_file)?;
 
@@ -66,12 +65,18 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
                 file: filename.to_string()
             }
         )?;
-        file_data.insert("kernel".to_string(), (filename, data));
+        file_data.insert("kernel".to_string(), (filename, data, 0));
     }
     for mut program_config in config.programs {
         if Program::is_reserved_name(&program_config.name) {
             return Err(
                 PkgError::ParseError {
+                    file: args.config_file.to_string()
+                }
+            );
+        } else if program_config.block_len == 0 {
+            return Err(
+                PkgError::ParseError { 
                     file: args.config_file.to_string()
                 }
             );
@@ -86,12 +91,16 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
                 }
             )?; 
             regions[0] = Region { 
-                phys_addr: driver.base, 
-                virt_addr: driver.base | 
+                name: None,
+                phys_addr: 0, 
+                virt_addr: driver.base, 
+                len: ((driver.len * 4).ilog2() - 1) << Region::LEN_SHIFT | 
                     Region::ENABLE_MASK | 
                     ((RegionAttr::RW as u32) << Region::PERM_SHIFT) 
-                    | Region::DEVICE_MASK, 
-                len: driver.len * 4
+                    | Region::DEVICE_MASK
+                    | Region::VIRTUAL_MASK, 
+                actual_len: driver.len * 4,
+                codes: 0,
             };
             inter = driver.inter;
         } else {
@@ -119,7 +128,8 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
                     file: program_config.name.to_string()
                 }
             )?,
-            regions 
+            regions,
+            program_config.block_len
         );
 
         if let Some(program) = programs.insert(program.name.to_string(), program) {
@@ -149,15 +159,14 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
             }
         )?;
 
-
-        file_data.insert(program_config.name, (filename, data));
+        file_data.insert(program_config.name, (filename, data, program_config.block_len));
     }
-    queue_requirements.requirements_satisfied()?;
 
+    queue_requirements.requirements_satisfied()?;
     let queues = queue_requirements.get_queues();
 
     let mut files = HashMap::new();
-    for (name, (filename, data)) in &file_data {
+    for (name, (filename, data, block_len)) in &file_data {
         let data = ElfFile::parse(data.as_ref()).map_err(|_| 
             PkgError::ReadError {
                 file: filename.to_string()
@@ -166,6 +175,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         files.insert(name.to_string(), LoadedConfig {
             filename: filename.to_string(),
             data,
+            block_len: *block_len
         });
     }
 
@@ -180,9 +190,14 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         queues.async_endpoints_size,
         queues.messages_size
     );
+    let mut codes_offsets = HashMap::new();
+    let mut codes_size = 0;
     for (name, file) in files {
-        get_file_regions(&name, &file, &mut allocs, &mut renames)?;
+        let s0 = get_file_regions(&name, &file, &mut allocs, &mut renames, &mut codes_offsets, codes_size)?;
+        codes_size = s0;
     }
+
+    add_error_codes(&mut allocs, codes_size);
 
     let alloc_info = do_allocs(allocs, &mut ram, &mut flash, &mut sections, &mut programs)?;
 
@@ -215,7 +230,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     let mut prog_table_bytes = Vec::new();
     prog_table_bytes.extend_from_slice(&(programs.len() as u32).to_ne_bytes());
     let mut programs = Vec::from_iter(programs.into_values());
-    // plug in locations of queues and endpoints
+    // plug in locations of queues, endpoints and error codes
     for program in &mut programs {
         if program.num_sync_endpoints > 0 {
             program.sync_endpoints = alloc_info.sync_endpoints_phys as u32 + queues.sync_endpoints_offsets[&program.name] as u32;
@@ -232,6 +247,17 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         }
         if program.num_async_queues > 0 {
             program.async_endpoints = alloc_info.async_queues_virt as u32 + queues.async_queue_offsets[&endpoint] as u32;
+        }
+
+        for region in &mut program.regions {
+            // regions that are enabled and not device need protection
+            if region.is_enabled() && !region.is_device() && region.has_virt() {
+                let name = region.name.as_ref().unwrap();
+                let codes_name = format!("{}{}", program.name, name);
+                if let Some(codes_offset) = codes_offsets.get(&codes_name) {
+                    region.codes = (alloc_info.codes + *codes_offset) as u32;
+                }
+            }
         }
     }
     programs.sort_by(|p1, p2| -> Ordering {
@@ -270,6 +296,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
             cmd: args.objcopy.to_string() 
         }
     )?;
+
     let link_file = create_link_file(
         &path, 
         &sections, 
@@ -283,13 +310,14 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     for file in link_files {
         cmd.arg(file);
     }
+    let exe_file = path.join("small_os.o");
     cmd
         .arg("-T")
         .arg(link_file)
         .arg("-e")
         .arg(&alloc_info.kernel_entry.to_string())
         .arg("-o")
-        .arg(args.outfile)
+        .arg(&exe_file)
         .arg("-z")
         .arg("noexecstack");
     check_cmd(cmd).map_err(|_| 
@@ -297,6 +325,9 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
             cmd: args.ld 
         }
     )?;
+    
+    add_final_crcs(exe_file.as_os_str().to_str().unwrap(), args.outfile)?;
+
     for program in programs {
         program.display(0);
     }
