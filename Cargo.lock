@@ -74,7 +74,7 @@ dependencies = [
 [[package]]
 name = "hamming"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/hamming.git#be00e58f13db7bd9f09431c94444e9d1bc081920"
+source = "git+ssh://git@github.com/F-gigabyte/hamming.git#e0c265f0a7911ee376eddca1745a117da3712855"
 dependencies = [
  "crc32",
 ]
