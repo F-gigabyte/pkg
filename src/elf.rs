@@ -58,7 +58,25 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
                 let actual_len = u32::from_le_bytes(program_table_data[region_offset + 3 * mem::size_of::<u32>()..region_offset + 4 * mem::size_of::<u32>()].try_into().unwrap()) as usize;
                 let data_offset = get_file_offset_from_phys_addr(&file, phys_addr, actual_len).unwrap();
                 let data = &file.data()[data_offset..data_offset + actual_len];
-                let crc = calc_crc(&data);
+                let mut crc_data = Vec::new();
+                for i in 0..(data.len() / 4) {
+                    let word = ((data[i] as u32) << 24) | ((data[i + 1] as u32) << 16) | ((data[i + 2] as u32) << 8) | data[i + 3] as u32;
+                    crc_data.push(word);
+                }
+                let mul = data.len() & !3;
+                if mul != data.len() {
+                    let last_bytes = data.len() - mul;
+                    let mut final_word = 0;
+                    for i in mul..data.len() {
+                        final_word |= (data[i] as u32) << ((3 + mul - i) * 8)
+                    }
+                    // add 0xff for final unwritten flash memory
+                    for i in last_bytes..4 {
+                        final_word |= 0xff << ((3 - i) * 8);
+                    }
+                    crc_data.push(final_word);
+                }
+                let crc = calc_crc(&crc_data);
                 update_table.push((program_table.elf_section_header().sh_offset(Endianness::Little) as usize + crc_offset, crc));
             }
         }
@@ -193,7 +211,8 @@ pub fn get_file_regions(
                     // dividing by size of u32 has no remainder as already made sure actual size
                     // multiple of u32
                     let blocks = ((actual_size / mem::size_of::<u32>()) + block_len - 1) / block_len;
-                    codes_size += (blocks * calc_symbol_len(block_len)) * mem::size_of::<u32>();
+                    // +1 for CRC
+                    codes_size += (blocks * calc_symbol_len(block_len) + 1) * mem::size_of::<u32>();
                 }
             }
             // put section to be allocated later
@@ -234,7 +253,8 @@ pub fn get_file_regions(
             // dividing by size of u32 has no remainder as already made sure actual size
             // multiple of u32
             let blocks = ((stack_size / mem::size_of::<u32>()) + block_len - 1) / block_len;
-            codes_size += (blocks * calc_symbol_len(block_len)) * mem::size_of::<u32>();
+            // +1 for CRC
+            codes_size += (blocks * calc_symbol_len(block_len) + 1) * mem::size_of::<u32>();
         }
         let alloc = Alloc { 
             name: name.to_string(),
