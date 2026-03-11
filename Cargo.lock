@@ -44,7 +44,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 [[package]]
 name = "crc32"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/crc32.git#2cfc45f0e2913ae24c6b2f330e77195e4a3ab1ce"
+source = "git+ssh://git@github.com/F-gigabyte/crc32.git#661fc5cd77b7f07432a815bf74443ad6136f50ac"
 
 [[package]]
 name = "crc32fast"
@@ -74,7 +74,7 @@ dependencies = [
 [[package]]
 name = "hamming"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/hamming.git#e0c265f0a7911ee376eddca1745a117da3712855"
+source = "git+ssh://git@github.com/F-gigabyte/hamming.git#c093f466e6a6c04c37d09faa44ffbe372f13235f"
 dependencies = [
  "crc32",
 ]
