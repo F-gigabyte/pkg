@@ -43,7 +43,7 @@ pub struct Endpoint {
 pub struct ProgramConfig {
     pub name: String,
     pub priority: u8,
-    pub driver: u16,
+    pub driver: String,
     pub debug_src: String,
     pub release_src: String,
     pub num_sync_queues: u32,

@@ -53,7 +53,7 @@ pub enum PkgError {
     },
     InvalidDriver {
         name: String, 
-        driver: u16
+        driver: String
     },
     RepeatedProgram {
         name: String

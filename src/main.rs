@@ -83,11 +83,12 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         }
         let mut regions = [const { Region::default() }; 8];
         let inter;
-        if program_config.driver != 0 {
-            let driver = find_driver(program_config.driver).ok_or(
+        let driver_num;
+        if program_config.driver != "" {
+            let driver = find_driver(&program_config.driver).ok_or(
                 PkgError::InvalidDriver {
                         name: program_config.name.to_string(), 
-                        driver: program_config.driver
+                        driver: program_config.driver.to_string()
                 }
             )?; 
             regions[0] = Region { 
@@ -103,14 +104,16 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
                 codes: 0,
             };
             inter = driver.inter;
+            driver_num = driver.num;
         } else {
-            inter = 0xff;
+            inter = [0xff; 4];
+            driver_num = 0;
         };
 
         let program = Program::new(
             program_config.name.to_string(),
             program_config.priority, 
-            program_config.driver,
+            driver_num,
             inter,
             program_config.num_sync_queues,
             u32::try_from(program_config.sync_endpoints.len()).map_err(|_| 
@@ -182,7 +185,8 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     let mut flash = MemMap::new("Flash", FLASH_START, FLASH_LEN);
     let mut ram = MemMap::new("RAM", RAM_START, RAM_LEN);
     let mut allocs = default_allocs(
-        Program::get_prog_size() * programs.len(),
+        // + 4 for the len bytes at the start
+        Program::get_prog_size() * programs.len() + 4,
         PROC_SIZE * programs.len(),
         queues.sync_queues_size,
         queues.async_queues_size,
@@ -228,7 +232,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     let async_queues_file = queues.write_async_endpoints_file(path, &alloc_info, &args.objcopy)?;
 
     let mut prog_table_bytes = Vec::new();
-    prog_table_bytes.extend_from_slice(&(programs.len() as u32).to_ne_bytes());
+    prog_table_bytes.extend_from_slice(&(programs.len() as u32).to_le_bytes());
     let mut programs = Vec::from_iter(programs.into_values());
     // plug in locations of queues, endpoints and error codes
     for program in &mut programs {

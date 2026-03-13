@@ -48,7 +48,7 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
     let num_programs = u32::from_le_bytes(program_table_data[..mem::size_of::<u32>()].try_into().unwrap());
     for i in 0..num_programs {
         let program_offset = 4 + Program::get_prog_size() * (i as usize);
-        let regions_offset = program_offset + 3 * mem::size_of::<u32>();
+        let regions_offset = program_offset + 4 * mem::size_of::<u32>();
         for j in 0..8 {
             let region_offset = regions_offset + j * Region::get_region_size();
             let len = u32::from_le_bytes(program_table_data[region_offset + 2 * mem::size_of::<u32>()..region_offset + 3 * mem::size_of::<u32>()].try_into().unwrap());
@@ -60,7 +60,8 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
                 let data = &file.data()[data_offset..data_offset + actual_len];
                 let mut crc_data = Vec::new();
                 for i in 0..(data.len() / 4) {
-                    let word = ((data[i] as u32) << 24) | ((data[i + 1] as u32) << 16) | ((data[i + 2] as u32) << 8) | data[i + 3] as u32;
+                    let i = i * 4;
+                    let word = (data[i] as u32) | ((data[i + 1] as u32) << 8) | ((data[i + 2] as u32) << 16) | ((data[i + 3] as u32) << 24);
                     crc_data.push(word);
                 }
                 let mul = data.len() & !3;
@@ -68,11 +69,11 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
                     let last_bytes = data.len() - mul;
                     let mut final_word = 0;
                     for i in mul..data.len() {
-                        final_word |= (data[i] as u32) << ((3 + mul - i) * 8)
+                        final_word |= (data[i] as u32) << ((i - mul) * 8)
                     }
                     // add 0xff for final unwritten flash memory
                     for i in last_bytes..4 {
-                        final_word |= 0xff << ((3 - i) * 8);
+                        final_word |= 0xff << (i * 8);
                     }
                     crc_data.push(final_word);
                 }
@@ -210,9 +211,13 @@ pub fn get_file_regions(
                     let block_len = file.block_len as usize;
                     // dividing by size of u32 has no remainder as already made sure actual size
                     // multiple of u32
-                    let blocks = ((actual_size / mem::size_of::<u32>()) + block_len - 1) / block_len;
+                    let blocks = (actual_size / mem::size_of::<u32>()) / block_len;
                     // +1 for CRC
-                    codes_size += (blocks * calc_symbol_len(block_len) + 1) * mem::size_of::<u32>();
+                    codes_size += blocks * (calc_symbol_len(block_len) + 1) * mem::size_of::<u32>();
+                    let rem_block = (actual_size / mem::size_of::<u32>()) - blocks * block_len;
+                    if rem_block != 0 {
+                        codes_size += (calc_symbol_len(rem_block) + 1) * mem::size_of::<u32>();
+                    }
                 }
             }
             // put section to be allocated later
@@ -252,9 +257,13 @@ pub fn get_file_regions(
             let block_len = file.block_len as usize;
             // dividing by size of u32 has no remainder as already made sure actual size
             // multiple of u32
-            let blocks = ((stack_size / mem::size_of::<u32>()) + block_len - 1) / block_len;
+            let blocks = (actual_stack_size / mem::size_of::<u32>()) / block_len;
             // +1 for CRC
-            codes_size += (blocks * calc_symbol_len(block_len) + 1) * mem::size_of::<u32>();
+            codes_size += blocks * (calc_symbol_len(block_len) + 1) * mem::size_of::<u32>();
+            let rem_block = (actual_stack_size / mem::size_of::<u32>()) - blocks * block_len;
+            if rem_block != 0 {
+                codes_size += (calc_symbol_len(rem_block) + 1) * mem::size_of::<u32>();
+            }
         }
         let alloc = Alloc { 
             name: name.to_string(),

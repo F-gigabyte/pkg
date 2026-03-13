@@ -1,13 +1,13 @@
 use capitalize::Capitalize;
 
-use crate::{errors::PkgError, region::Region};
+use crate::{drivers::lookup_driver, errors::PkgError, region::Region};
 
 #[derive(Debug)]
 pub struct Program {
     pub name: String,
     pub priority: u8,
     pub driver: u16,
-    pub inter: u8,
+    pub inter: [u8; 4],
     pub sp: Option<u32>,
     pub entry: Option<u32>,
     pub regions: [Region; 8],
@@ -27,7 +27,7 @@ impl Program {
         name: String,
         priority: u8,
         driver: u16,
-        inter: u8,
+        inter: [u8; 4],
         num_sync_queues: u32,
         num_sync_endpoints: u32,
         num_async_queues: u32,
@@ -70,12 +70,13 @@ impl Program {
     }
 
     pub const fn get_prog_size() -> usize {
-        Region::get_region_size() * 8 + 12 * std::mem::size_of::<u32>()
+        Region::get_region_size() * 8 + 13 * std::mem::size_of::<u32>()
     }
 
     pub fn serialise(&self) -> Result<Vec<u8>, PkgError> {
         let mut res = Vec::new();
-        res.extend_from_slice(&(self.priority as u32 | ((self.driver as u32) << 16) | ((self.inter as u32) << 8)).to_le_bytes());
+        res.extend_from_slice(&(self.priority as u32 | ((self.driver as u32) << 16)).to_le_bytes());
+        res.extend_from_slice(&self.inter);
         res.extend_from_slice(&self.sp.ok_or(
                 PkgError::NoProgramStack {
                     name: self.name.to_string()
@@ -111,10 +112,12 @@ impl Program {
         println!("{}{}", indent, self.name.capitalize());
         println!("{}\tPriority: {}", indent, self.priority);
         if self.driver != 0 {
-            println!("{}\tDriver: {}", indent, self.driver);
+            println!("{}\tDriver: {} ({})", indent, self.driver, lookup_driver(self.driver).unwrap());
         }
-        if self.inter != 0xff {
-            println!("{}\tInterrupt: {}", indent, self.inter);
+        for (i, inter) in self.inter.iter().enumerate() {
+            if *inter != 0xff {
+                println!("{}\tInterrupt {}: {}", indent, i, inter);
+            }
         }
         if let Some(sp) = self.sp {
             println!("{}\tStack Region: {}", indent, sp)
