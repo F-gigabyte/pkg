@@ -42,7 +42,8 @@ pub fn create_link_file(
     prog_table_file: &str, 
     async_queues_file: Option<&str>,
     sync_endpoints_file: Option<&str>,
-    async_endpoints_file: Option<&str>
+    async_endpoints_file: Option<&str>,
+    args_file: &str
     ) -> Result<String, PkgError> {
 
     let mut link_data = String::new();
@@ -90,6 +91,7 @@ pub fn create_link_file(
         );
     }
     link_data = format!("{}\n\tprogram_table 0x{:x} : AT(0x{:x}) {{\n\t\t__program_table = .;\n\t\t{}\n\t}}", link_data, alloc_info.prog_table_phys, alloc_info.prog_table_phys, prog_table_file);
+    link_data = format!("{}\n\targs 0x{:x} : AT(0x{:x}) {{\n\t\t__args = .;\n\t\t{}\n\t}}", link_data, alloc_info.args, alloc_info.args, args_file);
     if let Some(sync_endpoints_file) = sync_endpoints_file {
         link_data = format!("{}\n\tsync_endpoints 0x{:x} : AT(0x{:x}) {{\n\t\t{}\n\t}}", link_data, alloc_info.sync_endpoints_phys, alloc_info.sync_endpoints_phys, sync_endpoints_file);
     }

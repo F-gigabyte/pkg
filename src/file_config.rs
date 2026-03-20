@@ -43,7 +43,8 @@ pub struct Endpoint {
 pub struct ProgramConfig {
     pub name: String,
     pub priority: u8,
-    pub driver: String,
+    pub driver: Option<String>,
+    pub pins: Option<Vec<u8>>,
     pub debug_src: String,
     pub release_src: String,
     pub num_sync_queues: u32,
@@ -55,6 +56,8 @@ pub struct ProgramConfig {
 
 pub struct LoadedConfig<'a> {
     pub filename: String,
+    pub driver: u16,
+    pub pins: Option<Vec<u8>>,
     pub block_len: u32,
     pub data: ElfFile32<'a>,
 }

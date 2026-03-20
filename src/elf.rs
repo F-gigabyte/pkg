@@ -4,7 +4,7 @@ use hamming::calc_symbol_len;
 use crc32::calc_crc;
 use object::{Endianness, Object, ObjectKind, ObjectSection, ObjectSymbol, SectionIndex, StringTable, elf::{SHF_ALLOC, SHF_EXECINSTR, SHF_WRITE, STT_FUNC}, read::elf::{ElfFile, ElfFile32, FileHeader, ProgramHeader, SectionHeader}};
 
-use crate::{allocs::{Alloc, AllocType}, errors::PkgError, file_config::LoadedConfig, program::Program, region::Region, region_attr::RegionAttr, section_attr::SectionAttr, sections::SectionRename};
+use crate::{allocs::{Alloc, AllocType}, driver_args::DriverArgs, errors::PkgError, file_config::LoadedConfig, program::Program, region::Region, region_attr::RegionAttr, section_attr::SectionAttr, sections::SectionRename};
 
 const MIN_REGION_SIZE: u32 = 256;
 
@@ -48,7 +48,7 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
     let num_programs = u32::from_le_bytes(program_table_data[..mem::size_of::<u32>()].try_into().unwrap());
     for i in 0..num_programs {
         let program_offset = 4 + Program::get_prog_size() * (i as usize);
-        let regions_offset = program_offset + 4 * mem::size_of::<u32>();
+        let regions_offset = program_offset + 5 * mem::size_of::<u32>();
         for j in 0..8 {
             let region_offset = regions_offset + j * Region::get_region_size();
             let len = u32::from_le_bytes(program_table_data[region_offset + 2 * mem::size_of::<u32>()..region_offset + 3 * mem::size_of::<u32>()].try_into().unwrap());
@@ -102,7 +102,7 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
 }
 
 pub fn get_file_regions(
-    name: &str, 
+    name: &str,
     file: &LoadedConfig, 
     allocs: &mut VecDeque<Alloc>, 
     renames: &mut HashMap<String, (Vec<SectionRename>, Vec<String>)>, 
@@ -160,8 +160,7 @@ pub fn get_file_regions(
                     }
                 )?
             );
-            let sec_size = sec.sh_size(Endianness::Little) as usize;
-            let size = sec_size as usize;
+            let size = sec.sh_size(Endianness::Little) as usize;
             let addr = sec.sh_addr(Endianness::Little) as usize;
             // get section flags
             let mut flags = SectionAttr::new(true, false, false);

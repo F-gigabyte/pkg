@@ -11,7 +11,7 @@ const SYNC_QUEUE_SIZE: usize = 16;
 const ASYNC_QUEUE_SIZE: usize = 28;
 
 // message header length in bytes
-const MESSAGE_HEADER_SIZE: usize = 12;
+const MESSAGE_HEADER_SIZE: usize = 16;
 
 struct AsyncQueue {
     pub buffer: u32,

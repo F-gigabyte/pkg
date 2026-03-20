@@ -55,6 +55,20 @@ pub enum PkgError {
         name: String, 
         driver: String
     },
+    DriverTaken {
+        name: String, 
+        driver: String
+    },
+    InvalidPins {
+        name: String,
+        driver: String,
+        pins: Vec<u8>
+    },
+    PinsTaken {
+        name: String,
+        driver: String,
+        pins: Vec<u8>
+    },
     RepeatedProgram {
         name: String
     },
@@ -122,6 +136,35 @@ impl fmt::Display for PkgError {
             },
             PkgError::InvalidDriver { name, driver } => {
                 write!(fmt, "Invalid driver for {} of '{}'.", name, driver)
+            },
+            PkgError::DriverTaken { name, driver } => {
+                write!(fmt, "Repeated driver for {} of '{}'.", name, driver)
+            },
+            PkgError::InvalidPins { name, driver, pins } => {
+                assert!(pins.len() > 0);
+                if pins.len() == 1 {
+                    write!(fmt, "Invalid pin for {} with driver {} of '{}'.", name, driver, pins.first().unwrap())
+                } else {
+                    assert!(pins.len() >= 2);
+                    write!(fmt, "Invalid pins for {} with driver {} of ", name, driver)?;
+                    for i in 0..pins.len() - 2 {
+                        write!(fmt, "'{}', ", pins[i])?;
+                    }
+                    write!(fmt, "'{}' and '{}'.", pins[pins.len() - 2], pins[pins.len() - 1])
+                }
+            },
+            PkgError::PinsTaken { name, driver, pins } => {
+                assert!(pins.len() > 0);
+                if pins.len() == 1 {
+                    write!(fmt, "Repeated pin for {} with driver {} of '{}'.", name, driver, pins.first().unwrap())
+                } else {
+                    assert!(pins.len() >= 2);
+                    write!(fmt, "Repeated pins for {} with driver {} of ", name, driver)?;
+                    for i in 0..pins.len() - 2 {
+                        write!(fmt, "'{}', ", pins[i])?;
+                    }
+                    write!(fmt, "'{}' and '{}'.", pins[pins.len() - 2], pins[pins.len() - 1])
+                }
             },
             PkgError::RepeatedProgram { name } => {
                 write!(fmt, "Repeated program with name '{}'.", name)

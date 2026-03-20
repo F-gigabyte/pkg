@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use capitalize::Capitalize;
 
 use crate::{drivers::lookup_driver, errors::PkgError, region::Region};
@@ -5,6 +7,7 @@ use crate::{drivers::lookup_driver, errors::PkgError, region::Region};
 #[derive(Debug)]
 pub struct Program {
     pub name: String,
+    pub pid: u32,
     pub priority: u8,
     pub driver: u16,
     pub inter: [u8; 4],
@@ -19,8 +22,11 @@ pub struct Program {
     pub num_async_endpoints: u32,
     pub async_queues: u32,
     pub async_endpoints: u32,
-    pub block_len: u32
+    pub block_len: u32,
+    pub pin_mask: u32
 }
+
+static PID: AtomicU32 = AtomicU32::new(0);
 
 impl Program {
     pub fn new(
@@ -33,10 +39,12 @@ impl Program {
         num_async_queues: u32,
         num_async_endpoints: u32,
         regions: [Region; 8],
-        block_len: u32
+        block_len: u32,
+        pin_mask: u32
     ) -> Self {
 
         Self { 
+            pid: PID.fetch_add(1, Ordering::Acquire),
             name, 
             priority, 
             driver, 
@@ -52,12 +60,13 @@ impl Program {
             num_async_endpoints, 
             async_queues: 0, 
             async_endpoints: 0,
-            block_len 
+            block_len,
+            pin_mask 
         }
     }
 
     pub fn is_reserved_name(name: &str) -> bool {
-        matches!(name, "kernel" | "sync" | "async" | "program_table" | "procs" | "" | "codes")
+        matches!(name, "kernel" | "sync" | "async" | "program_table" | "procs" | "" | "codes" | "args")
     }
 
     pub fn find_empty_region(&mut self) -> Option<(usize, &mut Region)> {
@@ -70,11 +79,12 @@ impl Program {
     }
 
     pub const fn get_prog_size() -> usize {
-        Region::get_region_size() * 8 + 13 * std::mem::size_of::<u32>()
+        Region::get_region_size() * 8 + 15 * std::mem::size_of::<u32>()
     }
 
     pub fn serialise(&self) -> Result<Vec<u8>, PkgError> {
         let mut res = Vec::new();
+        res.extend_from_slice(&(self.pid.to_le_bytes()));
         res.extend_from_slice(&(self.priority as u32 | ((self.driver as u32) << 16)).to_le_bytes());
         res.extend_from_slice(&self.inter);
         res.extend_from_slice(&self.sp.ok_or(
@@ -103,6 +113,7 @@ impl Program {
         res.extend_from_slice(&self.async_queues.to_le_bytes());
         res.extend_from_slice(&self.async_endpoints.to_le_bytes());
         res.extend_from_slice(&self.block_len.to_le_bytes());
+        res.extend_from_slice(&self.pin_mask.to_le_bytes());
         Ok(res)
     }
 
@@ -110,6 +121,7 @@ impl Program {
         let indent_len = indent;
         let indent = "\t".repeat(indent);
         println!("{}{}", indent, self.name.capitalize());
+        println!("{}\tPID: {}", indent, self.pid);
         println!("{}\tPriority: {}", indent, self.priority);
         if self.driver != 0 {
             println!("{}\tDriver: {} ({})", indent, self.driver, lookup_driver(self.driver).unwrap());
@@ -148,5 +160,8 @@ impl Program {
             println!("{}\tAsync Endpoints Address: 0x{:x}", indent, self.async_endpoints);
         }
         println!("{}\tBlock Length: {}", indent, self.block_len);
+        if self.pin_mask != 0 {
+            println!("{}\tPin Mask: {:b}", indent, self.pin_mask);
+        }
     }
 }

@@ -4,7 +4,7 @@ use object::read::elf::ElfFile;
 
 use ansi_term::Color::Red;
 
-use crate::{allocs::{MemMap, add_error_codes, default_allocs, do_allocs}, args::Args, cmds::check_cmd, drivers::find_driver, elf::{add_final_crcs, get_file_regions}, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
+use crate::{allocs::{MemMap, add_error_codes, default_allocs, do_allocs}, args::Args, cmds::check_cmd, driver_args::DriverArgs, drivers::{DriverError, PinError, find_driver, take_pins}, elf::{add_final_crcs, get_file_regions}, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
 
 pub mod drivers;
 pub mod queues;
@@ -19,8 +19,9 @@ pub mod cmds;
 pub mod file_config;
 pub mod args;
 pub mod elf;
+pub mod driver_args;
 
-const PROC_SIZE: usize = 13 * 4;
+const PROC_SIZE: usize = 12 * 4;
 
 const FLASH_START: usize = 0x10000000;
 const FLASH_LEN: usize = 2048 * 1024;
@@ -36,6 +37,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     let mut renames = HashMap::new();
     let mut file_data = HashMap::new();
     let mut programs = HashMap::new();
+    let mut driver_args = DriverArgs::new();
 
     let message_len = config.async_message_len as usize;
 
@@ -46,10 +48,10 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
             }
         );
     }
+    let mut data = Vec::new();
     let mut queue_requirements = QueueRequirements::new(message_len);
 
     {
-        let mut data = Vec::new();
         let filename = if args.debug {
             config.kernel.debug_src
         } else {
@@ -65,7 +67,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
                 file: filename.to_string()
             }
         )?;
-        file_data.insert("kernel".to_string(), (filename, data, 0));
+        file_data.insert("kernel".to_string(), (filename, 0, None, 0, data.len(), 0));
     }
     for mut program_config in config.programs {
         if Program::is_reserved_name(&program_config.name) {
@@ -84,13 +86,47 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         let mut regions = [const { Region::default() }; 8];
         let inter;
         let driver_num;
-        if program_config.driver != "" {
-            let driver = find_driver(&program_config.driver).ok_or(
-                PkgError::InvalidDriver {
-                        name: program_config.name.to_string(), 
-                        driver: program_config.driver.to_string()
+        let mut pin_mask = 0;
+        if let Some(driver_name) = &program_config.driver {
+            let driver = find_driver(driver_name).map_err(|err| {
+                match err {
+                    DriverError::Invalid => {
+                        PkgError::InvalidDriver {
+                            name: program_config.name.to_string(), 
+                            driver: driver_name.to_string()
+                        }
+                    },
+                    DriverError::Taken => {
+                        PkgError::DriverTaken {
+                            name: program_config.name.to_string(), 
+                            driver: driver_name.to_string()
+                        }
+                    }
                 }
-            )?; 
+            })?; 
+            if let Some(pins) = &program_config.pins {
+                take_pins(&mut driver_args, pins, &driver).map_err(|err| {
+                    match err {
+                        PinError::Taken(taken) => {
+                            PkgError::PinsTaken { 
+                                name: program_config.name.to_string(), 
+                                driver: driver_name.to_string(), 
+                                pins: taken 
+                            }
+                        },
+                        PinError::Invalid(invalid) => {
+                            PkgError::InvalidPins { 
+                                name: program_config.name.to_string(), 
+                                driver: driver_name.to_string(), 
+                                pins: invalid 
+                            }
+                        }
+                    }
+                })?;
+                for pin in pins {
+                    pin_mask |= 1 << pin;
+                }
+            }
             regions[0] = Region { 
                 name: None,
                 phys_addr: 0, 
@@ -132,7 +168,8 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
                 }
             )?,
             regions,
-            program_config.block_len
+            program_config.block_len,
+            pin_mask
         );
 
         if let Some(program) = programs.insert(program.name.to_string(), program) {
@@ -145,7 +182,6 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
 
         queue_requirements.add_program_queues(&mut program_config);
 
-        let mut data = Vec::new();
         let filename = if args.debug {
             program_config.debug_src
         } else {
@@ -156,29 +192,35 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
                 file: filename.to_string()
             }
         )?;
+        let start = data.len();
         file.read_to_end(&mut data).map_err(|_| 
             PkgError::ReadError {
                 file: filename.to_string()
             }
         )?;
 
-        file_data.insert(program_config.name, (filename, data, program_config.block_len));
+        file_data.insert(program_config.name, (filename, driver_num, program_config.pins, start, data.len(), program_config.block_len));
     }
+
+    println!("Have pin functions {:#?}", driver_args.pin_func);
+    println!("Have pin pads {:#x?}", driver_args.pads);
 
     queue_requirements.requirements_satisfied()?;
     let queues = queue_requirements.get_queues();
 
     let mut files = HashMap::new();
-    for (name, (filename, data, block_len)) in &file_data {
-        let data = ElfFile::parse(data.as_ref()).map_err(|_| 
+    for (name, (filename, driver, pins, start, end, block_len)) in file_data {
+        let data = ElfFile::parse(&data[start..end]).map_err(|_| 
             PkgError::ReadError {
                 file: filename.to_string()
             }
         )?;
         files.insert(name.to_string(), LoadedConfig {
             filename: filename.to_string(),
+            driver: driver,
+            pins,
             data,
-            block_len: *block_len
+            block_len: block_len
         });
     }
 
@@ -284,7 +326,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         }
     )?;
     let prog_table_file_bin = prog_table_file_bin.to_string_lossy().to_string().to_string();
-
+    
     let mut cmd = Command::new(&args.objcopy);
     cmd
         .arg("-O")
@@ -301,6 +343,31 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         }
     )?;
 
+    let args_file_bin = path.join("args.bin");
+    let args_file = path.join("args.o").to_string_lossy().to_string().to_string();
+    fs::write(&args_file_bin, driver_args.serialise()).map_err(|_|
+        PkgError::WriteError { 
+            file: args_file_bin.to_str().unwrap().to_string() 
+        }
+    )?;
+    let args_file_bin = args_file_bin.to_string_lossy().to_string().to_string();
+    let mut cmd = Command::new(&args.objcopy);
+    cmd
+        .arg("-O")
+        .arg("elf32-littlearm")
+        .arg("-I")
+        .arg("binary")
+        .arg("-B")
+        .arg("arm")
+        .arg(&args_file_bin)
+        .arg(&args_file);
+    check_cmd(cmd).map_err(|_| 
+        PkgError::CmdError { 
+            cmd: args.objcopy.to_string() 
+        }
+    )?;
+
+
     let link_file = create_link_file(
         &path, 
         &sections, 
@@ -308,7 +375,8 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         &prog_table_file,
         async_queues_file.as_deref(),
         sync_endpoints_file.as_deref(),
-        async_endpoints_file.as_deref()
+        async_endpoints_file.as_deref(),
+        &args_file
     )?;
     let mut cmd = Command::new(&args.ld);
     for file in link_files {

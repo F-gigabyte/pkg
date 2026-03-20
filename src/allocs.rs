@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::{HashMap, VecDeque}};
 
-use crate::{Section, errors::PkgError, program::Program, region::Region, region_attr::RegionAttr};
+use crate::{Section, driver_args::DriverArgs, errors::PkgError, program::Program, region::Region, region_attr::RegionAttr};
 
 const BOOTLOADER_ADDR: usize = 0x10000000;
 const VECTORS_ADDR: usize = 0x10000000 + 256;
@@ -228,7 +228,8 @@ struct PartialAllocInfo {
     async_endpoints_phys: Option<usize>,
     proc_virt: Option<usize>,
     proc_len: Option<usize>,
-    codes: Option<usize>
+    codes: Option<usize>,
+    args: Option<usize>
 }
 
 impl PartialAllocInfo {
@@ -249,6 +250,7 @@ impl PartialAllocInfo {
             proc_virt: None, 
             proc_len: None,
             codes: None,
+            args: None,
         }
     }
 
@@ -268,7 +270,8 @@ impl PartialAllocInfo {
             async_endpoints_phys: self.async_endpoints_phys.unwrap(),
             proc_virt: self.proc_virt.unwrap(),
             proc_len: self.proc_len.unwrap(),
-            codes: self.codes.unwrap()
+            codes: self.codes.unwrap(),
+            args: self.args.unwrap()
         })
     }
 }
@@ -288,7 +291,8 @@ pub struct AllocInfo {
     pub async_endpoints_phys: usize,
     pub proc_virt: usize,
     pub proc_len: usize,
-    pub codes: usize
+    pub codes: usize,
+    pub args: usize
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -299,6 +303,7 @@ pub enum AllocType {
     ProgramTable,
     Procs,
     Codes,
+    Args,
     Other
 }
 
@@ -310,6 +315,7 @@ impl AllocType {
             "async" => Self::Async,
             "program_table" => Self::ProgramTable,
             "procs" => Self::Procs,
+            "args" => Self::Args,
             "codes" => Self::Codes,
             _ => Self::Other
         }
@@ -431,6 +437,9 @@ pub fn do_allocs(
             AllocType::Codes => {
                 alloc_info.codes = Some(runtime_addr);
             },
+            AllocType::Args => {
+                alloc_info.args = Some(runtime_addr);
+            },
             AllocType::Kernel => {
                 if let Some(entry_addr) = entry_addr {
                     alloc_info.kernel_entry = Some(entry_addr + runtime_addr);
@@ -515,6 +524,22 @@ pub fn default_allocs(
         entry_addr: None,
         size: procs_size,
         actual_size: procs_size,
+        alignment: 4,
+    };
+    let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
+    allocs.insert(index, alloc);
+    
+    // args alloc
+    let alloc = Alloc {
+        name: "args".to_string(),
+        region: ".args".to_string(),
+        queue: true,
+        attr: RegionAttr::R,
+        load: false,
+        store: true,
+        entry_addr: None,
+        size: std::mem::size_of::<DriverArgs>(),
+        actual_size: std::mem::size_of::<DriverArgs>(),
         alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
