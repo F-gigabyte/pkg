@@ -4,7 +4,7 @@ use hamming::calc_symbol_len;
 use crc32::calc_crc;
 use object::{Endianness, Object, ObjectKind, ObjectSection, ObjectSymbol, SectionIndex, StringTable, elf::{SHF_ALLOC, SHF_EXECINSTR, SHF_WRITE, STT_FUNC}, read::elf::{ElfFile, ElfFile32, FileHeader, ProgramHeader, SectionHeader}};
 
-use crate::{allocs::{Alloc, AllocType}, driver_args::DriverArgs, errors::PkgError, file_config::LoadedConfig, program::Program, region::Region, region_attr::RegionAttr, section_attr::SectionAttr, sections::SectionRename};
+use crate::{allocs::{Alloc, AllocType}, errors::PkgError, file_config::LoadedConfig, program::Program, region::Region, region_attr::RegionAttr, section_attr::SectionAttr, sections::SectionRename};
 
 const MIN_REGION_SIZE: u32 = 256;
 
@@ -47,7 +47,9 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
     let program_table_data = program_table.data().unwrap();
     let num_programs = u32::from_le_bytes(program_table_data[..mem::size_of::<u32>()].try_into().unwrap());
     for i in 0..num_programs {
+        // 4 bytes for num programs, then i program increments
         let program_offset = 4 + Program::get_prog_size() * (i as usize);
+        // increment after first 5 program fields
         let regions_offset = program_offset + 5 * mem::size_of::<u32>();
         for j in 0..8 {
             let region_offset = regions_offset + j * Region::get_region_size();

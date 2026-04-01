@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::{LazyLock, Mutex}};
 
-use crate::driver_args::{DriverArgs, PAD_ANALOG, PAD_NORMAL};
+use crate::driver_args::{DriverArgs, PAD_ANALOG, PAD_NORMAL, PAD_PULL_UP};
 
 pub struct Driver {
     pub name: &'static str,
@@ -309,7 +309,7 @@ static DRIVERS_TAKEN: LazyLock<Mutex<HashSet<u16>>> = LazyLock::new(|| {
 });
 
 static PINS_TAKEN: LazyLock<Mutex<HashSet<u8>>> = LazyLock::new(|| {
-    Mutex::new(HashSet::new())
+    Mutex::new(HashSet::from([4]))
 });
 
 pub enum DriverError {
@@ -381,6 +381,8 @@ pub fn take_pins(driver_args: &mut DriverArgs, pins: &[u8], driver: &Driver) -> 
             let pin_shift = (*pin as usize % 16) * 2;
             if driver.name == "ADC" {
                 driver_args.pads[pin_index] |= PAD_ANALOG << pin_shift;
+            } else if driver.name == "I2C0" || driver.name == "I2C1" {
+                driver_args.pads[pin_index] |= PAD_PULL_UP << pin_shift;
             } else {
                 driver_args.pads[pin_index] |= PAD_NORMAL << pin_shift;
             }

@@ -7,6 +7,13 @@ pub enum PkgError {
     ReadError {
         file: String
     },
+    NoFile {
+        file: String
+    },
+    MultipleFiles {
+        file: String,
+        files: Vec<String>
+    },
     WriteError {
         file: String
     },
@@ -91,6 +98,17 @@ impl fmt::Display for PkgError {
             },
             PkgError::ReadError { file } => {
                 write!(fmt, "Error reading file '{}'.", file)
+            },
+            PkgError::NoFile { file } => {
+                write!(fmt, "Unable to locate a suitable file for '{}'.", file)
+            },
+            PkgError::MultipleFiles { file, files } => {
+                assert!(files.len() >= 2);
+                write!(fmt, "Multiple candidates are suitable for '{}' of ", file)?;
+                for i in 0..files.len() - 2 {
+                    write!(fmt, "'{}', ", files[i])?;
+                }
+                write!(fmt, "'{}' and '{}'.", files[files.len() - 2], files[files.len() - 1])
             },
             PkgError::ParseError { file } => {
                 write!(fmt, "Error parsing file '{}'.", file)

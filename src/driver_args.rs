@@ -9,14 +9,20 @@ pub struct DriverArgs {
 pub const PAD_DISABLE: u32 = 0;
 pub const PAD_NORMAL: u32 = 1;
 pub const PAD_ANALOG: u32 = 2;
+pub const PAD_PULL_UP: u32 = 3;
 
 impl DriverArgs {
     pub fn new() -> Self {
-        Self {
+        let mut res = Self {
             pin_func: [u32::MAX; 4],
             pads: [0; 2],
             resets: 0
-        }
+        };
+        // Make kernel UART1 pad normal and set func sel as UART
+        res.pads[0] |= PAD_NORMAL << 8;
+        res.pin_func[0] &= !0xf0000;
+        res.pin_func[0] |= 2 << 16;
+        res
     }
 
     pub fn serialise(&self) -> Vec<u8> {

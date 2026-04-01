@@ -226,6 +226,8 @@ struct PartialAllocInfo {
     messages_len: Option<usize>,
     sync_endpoints_phys: Option<usize>,
     async_endpoints_phys: Option<usize>,
+    notifier_virt: Option<usize>,
+    notifier_len: Option<usize>,
     proc_virt: Option<usize>,
     proc_len: Option<usize>,
     codes: Option<usize>,
@@ -247,6 +249,8 @@ impl PartialAllocInfo {
             messages_len: None, 
             sync_endpoints_phys: None, 
             async_endpoints_phys: None, 
+            notifier_virt: None,
+            notifier_len: None,
             proc_virt: None, 
             proc_len: None,
             codes: None,
@@ -268,6 +272,8 @@ impl PartialAllocInfo {
             messages_len: self.messages_len.unwrap(),
             sync_endpoints_phys: self.sync_endpoints_phys.unwrap(),
             async_endpoints_phys: self.async_endpoints_phys.unwrap(),
+            notifier_virt: self.notifier_virt.unwrap(),
+            notifier_len: self.notifier_len.unwrap(),
             proc_virt: self.proc_virt.unwrap(),
             proc_len: self.proc_len.unwrap(),
             codes: self.codes.unwrap(),
@@ -289,6 +295,8 @@ pub struct AllocInfo {
     pub messages_len: usize,
     pub sync_endpoints_phys: usize,
     pub async_endpoints_phys: usize,
+    pub notifier_virt: usize,
+    pub notifier_len: usize,
     pub proc_virt: usize,
     pub proc_len: usize,
     pub codes: usize,
@@ -458,6 +466,10 @@ pub fn do_allocs(
                         alloc_info.sync_queues_len = Some(alloc.size);
                     }
                     ".endpoints" => alloc_info.sync_endpoints_phys = Some(runtime_addr),
+                    ".notifier" => {
+                        alloc_info.notifier_virt = Some(runtime_addr);
+                        alloc_info.notifier_len = Some(alloc.size);
+                    },
                     _ => {}
                 }
             },
@@ -493,6 +505,7 @@ pub fn default_allocs(
     sync_endpoints_size: usize,
     async_endpoints_size: usize,
     messages_size: usize,
+    notifier_size: usize
     ) -> VecDeque<Alloc> {
     
     let mut allocs = VecDeque::new();
@@ -620,6 +633,22 @@ pub fn default_allocs(
         entry_addr: None,
         size: messages_size,
         actual_size: messages_size,
+        alignment: 4,
+    };
+    let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
+    allocs.insert(index, alloc);
+
+    // notifiers alloc
+    let alloc = Alloc {
+        name: "sync".to_string(),
+        region: ".notifier".to_string(),
+        queue: true,
+        attr: RegionAttr::RW,
+        load: true,
+        store: false,
+        entry_addr: None,
+        size: notifier_size,
+        actual_size: notifier_size,
         alignment: 4,
     };
     let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);

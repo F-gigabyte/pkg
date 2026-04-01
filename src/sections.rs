@@ -138,6 +138,15 @@ pub fn create_link_file(
     );
     link_data = format!(
         "{}
+        \t__notifier_virt_start = 0x{:x};
+        \t__notifier_virt_end = 0x{:x} + 0x{:x};", 
+        link_data, 
+        alloc_info.notifier_virt, 
+        alloc_info.notifier_virt, 
+        alloc_info.notifier_len
+    );
+    link_data = format!(
+        "{}
         \t__procs_virt_start = 0x{:x};
         \t__procs_virt_end = 0x{:x} + 0x{:x};", 
         link_data, 

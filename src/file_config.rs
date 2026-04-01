@@ -8,8 +8,10 @@ use crate::errors::PkgError;
 #[derive(Deserialize)]
 pub struct FileConfig {
     pub async_message_len: u32,
+    pub debug_path: String,
+    pub release_path: String,
     pub kernel: KernelConfig,
-    pub programs: Vec<ProgramConfig>
+    pub programs: Vec<ProgramConfig>,
 }
 
 impl FileConfig {
@@ -29,28 +31,27 @@ impl FileConfig {
 
 #[derive(Deserialize)]
 pub struct KernelConfig {
-    pub debug_src: String,
-    pub release_src: String,
+    pub exec: String,
 }
 
 #[derive(Debug, Deserialize, Hash, PartialEq, Eq, Clone)]
 pub struct Endpoint {
     pub name: String,
-    pub queue: u32
+    pub queue: u8
 }
 
 #[derive(Deserialize)]
 pub struct ProgramConfig {
     pub name: String,
+    pub exec: String,
     pub priority: u8,
     pub driver: Option<String>,
     pub pins: Option<Vec<u8>>,
-    pub debug_src: String,
-    pub release_src: String,
-    pub num_sync_queues: u32,
+    pub num_sync_queues: u8,
     pub async_queues: Vec<usize>,
     pub sync_endpoints: Vec<Endpoint>,
     pub async_endpoints: Vec<Endpoint>,
+    pub num_notifiers: u8,
     pub block_len: u32,
 }
 

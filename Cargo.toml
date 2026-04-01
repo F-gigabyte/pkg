@@ -12,3 +12,4 @@ toml = "1.0.1"
 whoami = "2.1.1"
 crc32 = { git = "ssh://git@github.com/F-gigabyte/crc32.git" }
 hamming = { git = "ssh://git@github.com/F-gigabyte/hamming.git" }
+clap = { version = "4.6.0", features = ["derive"] }

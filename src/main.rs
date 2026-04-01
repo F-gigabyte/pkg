@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::HashMap, env, fs::{self, File}, io::Read, path::Path, process::{Command, exit}};
+use std::{cmp::Ordering, collections::HashMap, env, fs::{self, File, read_dir}, io::Read, path::Path, process::{Command, exit}};
 
 use object::read::elf::ElfFile;
 
@@ -29,9 +29,53 @@ const FLASH_LEN: usize = 2048 * 1024;
 const RAM_START: usize = 0x20000000;
 const RAM_LEN: usize = 264 * 1024;
 
-fn run(args: Vec<String>) -> Result<(), PkgError> {
-    let args = Args::parse(&args)?;
-    let config = FileConfig::parse(args.config_file)?;
+fn find_file(dir: &Path, name: &str) -> Result<String, PkgError> {
+    let test_dir = dir.join("deps");
+    let fingerprint_dir = dir.join(".fingerprint");
+    // file name of format  name '-' 16 character hexadecimal hash value
+    let dir = read_dir(test_dir).map_err(|_| {
+        PkgError::NoFile { 
+            file: name.to_string() 
+        }
+    })?;
+    let mut res = Vec::new();
+    let test_bin_name = format!("test-bin-{}", name);
+    for file in dir {
+        if let Ok(file) = file {
+            let file_name = file.file_name().into_string().unwrap();
+            let parts: Vec<_> = file_name.split('-').collect();
+            if parts.len() == 2 {
+                if parts[0] == name && parts[1].len() == 16 && parts[1].chars().all(|c| c.is_ascii_hexdigit()) {
+                    let fingerprint = fingerprint_dir.join(&file_name);
+                    if let Ok(fingerprint) = fingerprint.read_dir() {
+                        for test_file in fingerprint {
+                            if let Ok(test_file) = test_file {
+                                if *test_file.file_name() == *test_bin_name {
+                                    res.push(file.path().to_str().unwrap().to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    match res.len() {
+        0 => Err(PkgError::NoFile { 
+            file: name.to_string() 
+        }),
+        1 => Ok(res[0].to_string()),
+        _ => Err(PkgError::MultipleFiles { 
+            file: name.to_string(), 
+            files: res 
+        })
+    }
+}
+
+fn run() -> Result<(), PkgError> {
+    let args = Args::parse();
+    let config = FileConfig::parse(&args.cmd_args.config_file)?;
 
     let mut sections = Vec::new();
     let mut renames = HashMap::new();
@@ -52,10 +96,25 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     let mut queue_requirements = QueueRequirements::new(message_len);
 
     {
-        let filename = if args.debug {
-            config.kernel.debug_src
+        let release = if let Some(release) = args.cmd_args.kernel_release {
+            release
         } else {
-            config.kernel.release_src
+            args.cmd_args.release
+        };
+        let test = if let Some(test) = args.cmd_args.kernel_test {
+            test
+        } else {
+            args.cmd_args.test
+        };
+        let path = if release {
+            Path::new(&config.release_path).to_path_buf()
+        } else {
+            Path::new(&config.debug_path).to_path_buf()
+        };
+        let filename = if test {
+            find_file(&path, &config.kernel.exec)?
+        } else {
+            path.join(config.kernel.exec).to_str().unwrap().to_string()
         };
         let mut file = File::open(&filename).map_err(|_| 
             PkgError::ReadError {
@@ -69,17 +128,22 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         )?;
         file_data.insert("kernel".to_string(), (filename, 0, None, 0, data.len(), 0));
     }
+    let program_path = if args.cmd_args.release {
+        Path::new(&config.release_path).to_path_buf()
+    } else {
+        Path::new(&config.debug_path).to_path_buf()
+    };
     for mut program_config in config.programs {
         if Program::is_reserved_name(&program_config.name) {
             return Err(
                 PkgError::ParseError {
-                    file: args.config_file.to_string()
+                    file: args.cmd_args.config_file.to_string()
                 }
             );
         } else if program_config.block_len == 0 {
             return Err(
                 PkgError::ParseError { 
-                    file: args.config_file.to_string()
+                    file: args.cmd_args.config_file.to_string()
                 }
             );
         }
@@ -146,6 +210,25 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
             driver_num = 0;
         };
 
+        if program_config.num_sync_queues > 32 {
+            return Err(PkgError::ParseError { 
+                file: program_config.name.to_string()
+            });
+        }
+        
+        if program_config.num_notifiers > 32 {
+            return Err(PkgError::ParseError { 
+                file: program_config.name.to_string()
+            });
+        }
+
+        let num_async_queues = program_config.async_queues.len();
+        if num_async_queues > 32 {
+            return Err(PkgError::ParseError { 
+                file: program_config.name.to_string()
+            });
+        }
+        
         let program = Program::new(
             program_config.name.to_string(),
             program_config.priority, 
@@ -157,16 +240,13 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
                     file: program_config.name.to_string()
                 }
             )?,
-            u32::try_from(program_config.async_queues.len()).map_err(|_| 
-                PkgError::ParseError {
-                    file: program_config.name.to_string()
-                }
-            )?,
+            num_async_queues as u8,
             u32::try_from(program_config.async_endpoints.len()).map_err(|_| 
                 PkgError::ParseError {
                     file: program_config.name.to_string()
                 }
             )?,
+            program_config.num_notifiers,
             regions,
             program_config.block_len,
             pin_mask
@@ -182,10 +262,10 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
 
         queue_requirements.add_program_queues(&mut program_config);
 
-        let filename = if args.debug {
-            program_config.debug_src
+        let filename = if args.cmd_args.test {
+            find_file(&program_path, &program_config.exec)?
         } else {
-            program_config.release_src
+            program_path.join(program_config.exec).to_str().unwrap().to_string()
         };
         let mut file = File::open(&filename).map_err(|_| 
             PkgError::ReadError {
@@ -234,7 +314,8 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         queues.async_queues_size,
         queues.sync_endpoints_size,
         queues.async_endpoints_size,
-        queues.messages_size
+        queues.messages_size,
+        queues.notifier_size
     );
     let mut codes_offsets = HashMap::new();
     let mut codes_size = 0;
@@ -260,18 +341,18 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     let mut link_files = Vec::new();
     print_renames(&renames);
     for (file, (secs, symbols)) in renames {
-        rename_file_sections(&args.objcopy, path, &file, &secs, &symbols, &mut link_files)?;
+        rename_file_sections(&args.env_args.objcopy, path, &file, &secs, &symbols, &mut link_files)?;
         // based on answer by embradded on https://stackoverflow.com/questions/68622938/new-versions-of-ld-cannot-take-elf-files-as-input-to-link accessed 11/02/2026
     }
     
     ram.display(0);
     flash.display(0);
    
-    let sync_endpoints_file = queues.write_sync_enpoints_file(path, &alloc_info, &args.objcopy)?;
+    let sync_endpoints_file = queues.write_sync_enpoints_file(path, &alloc_info, &args.env_args.objcopy)?;
 
-    let async_endpoints_file = queues.write_async_endpoints_file(path, &alloc_info, &args.objcopy)?;
+    let async_endpoints_file = queues.write_async_endpoints_file(path, &alloc_info, &args.env_args.objcopy)?;
 
-    let async_queues_file = queues.write_async_endpoints_file(path, &alloc_info, &args.objcopy)?;
+    let async_queues_file = queues.write_async_endpoints_file(path, &alloc_info, &args.env_args.objcopy)?;
 
     let mut prog_table_bytes = Vec::new();
     prog_table_bytes.extend_from_slice(&(programs.len() as u32).to_le_bytes());
@@ -293,6 +374,10 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         }
         if program.num_async_queues > 0 {
             program.async_endpoints = alloc_info.async_queues_virt as u32 + queues.async_queue_offsets[&endpoint] as u32;
+        }
+
+        if program.num_notifiers > 0 {
+            program.notifiers = alloc_info.notifier_virt as u32 + queues.notifier_offsets[&program.name] as u32;
         }
 
         for region in &mut program.regions {
@@ -327,7 +412,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
     )?;
     let prog_table_file_bin = prog_table_file_bin.to_string_lossy().to_string().to_string();
     
-    let mut cmd = Command::new(&args.objcopy);
+    let mut cmd = Command::new(&args.env_args.objcopy);
     cmd
         .arg("-O")
         .arg("elf32-littlearm")
@@ -339,7 +424,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         .arg(&prog_table_file);
     check_cmd(cmd).map_err(|_| 
         PkgError::CmdError { 
-            cmd: args.objcopy.to_string() 
+            cmd: args.env_args.objcopy.to_string() 
         }
     )?;
 
@@ -351,7 +436,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         }
     )?;
     let args_file_bin = args_file_bin.to_string_lossy().to_string().to_string();
-    let mut cmd = Command::new(&args.objcopy);
+    let mut cmd = Command::new(&args.env_args.objcopy);
     cmd
         .arg("-O")
         .arg("elf32-littlearm")
@@ -363,7 +448,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         .arg(&args_file);
     check_cmd(cmd).map_err(|_| 
         PkgError::CmdError { 
-            cmd: args.objcopy.to_string() 
+            cmd: args.env_args.objcopy.to_string() 
         }
     )?;
 
@@ -378,7 +463,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         async_endpoints_file.as_deref(),
         &args_file
     )?;
-    let mut cmd = Command::new(&args.ld);
+    let mut cmd = Command::new(&args.env_args.ld);
     for file in link_files {
         cmd.arg(file);
     }
@@ -394,11 +479,11 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
         .arg("noexecstack");
     check_cmd(cmd).map_err(|_| 
         PkgError::CmdError { 
-            cmd: args.ld 
+            cmd: args.env_args.ld 
         }
     )?;
     
-    add_final_crcs(exe_file.as_os_str().to_str().unwrap(), args.outfile)?;
+    add_final_crcs(exe_file.as_os_str().to_str().unwrap(), &args.cmd_args.outfile)?;
 
     for program in programs {
         program.display(0);
@@ -407,8 +492,7 @@ fn run(args: Vec<String>) -> Result<(), PkgError> {
 }
 
 fn main() {
-    let args: Vec<_> = env::args().collect();
-    match run(args) {
+    match run() {
         Ok(()) => {},
         Err(err) => {
             eprintln!("{}", Red.paint(err.to_string()));

@@ -14,14 +14,16 @@ pub struct Program {
     pub sp: Option<u32>,
     pub entry: Option<u32>,
     pub regions: [Region; 8],
-    pub num_sync_queues: u32,
+    pub num_sync_queues: u8,
     pub num_sync_endpoints: u32,
     pub sync_queues: u32,
     pub sync_endpoints: u32,
-    pub num_async_queues: u32,
+    pub num_async_queues: u8,
     pub num_async_endpoints: u32,
     pub async_queues: u32,
     pub async_endpoints: u32,
+    pub num_notifiers: u8,
+    pub notifiers: u32,
     pub block_len: u32,
     pub pin_mask: u32
 }
@@ -29,15 +31,31 @@ pub struct Program {
 static PID: AtomicU32 = AtomicU32::new(0);
 
 impl Program {
+    const PRIORITY_SHIFT: usize = 0;
+    const DRIVER_SHIFT: usize = 16;
+
+    const PRIORITY_MASK: u32 = 0xff << Self::PRIORITY_SHIFT;
+    const DRIVER_MASK: u32 = 0xffff << Self::DRIVER_SHIFT;
+    const INTERRUPT_NONE: u8 = 0xff;
+
+    const SYNC_QUEUES_SHIFT: usize = 0;
+    const ASYNC_QUEUES_SHIFT: usize = 8;
+    const NOTIFIER_QUEUES_SHIFT: usize = 16;
+
+    const SYNC_QUEUES_MASK: u32 = 0xff << Self::SYNC_QUEUES_SHIFT;
+    const ASYNC_QUEUES_MASK: u32 = 0xff << Self::ASYNC_QUEUES_SHIFT;
+    const NOTIFIER_QUEUES_MASK: u32 = 0xff << Self::NOTIFIER_QUEUES_SHIFT;
+
     pub fn new(
         name: String,
         priority: u8,
         driver: u16,
         inter: [u8; 4],
-        num_sync_queues: u32,
+        num_sync_queues: u8,
         num_sync_endpoints: u32,
-        num_async_queues: u32,
+        num_async_queues: u8,
         num_async_endpoints: u32,
+        num_notifiers: u8,
         regions: [Region; 8],
         block_len: u32,
         pin_mask: u32
@@ -60,6 +78,8 @@ impl Program {
             num_async_endpoints, 
             async_queues: 0, 
             async_endpoints: 0,
+            num_notifiers,
+            notifiers: 0,
             block_len,
             pin_mask 
         }
@@ -85,7 +105,7 @@ impl Program {
     pub fn serialise(&self) -> Result<Vec<u8>, PkgError> {
         let mut res = Vec::new();
         res.extend_from_slice(&(self.pid.to_le_bytes()));
-        res.extend_from_slice(&(self.priority as u32 | ((self.driver as u32) << 16)).to_le_bytes());
+        res.extend_from_slice(&(((self.priority as u32) << Self::PRIORITY_SHIFT) | ((self.driver as u32) << Self::DRIVER_SHIFT)).to_le_bytes());
         res.extend_from_slice(&self.inter);
         res.extend_from_slice(&self.sp.ok_or(
                 PkgError::NoProgramStack {
@@ -104,14 +124,15 @@ impl Program {
         for region in &self.regions {
             res.extend(region.serialise().iter());
         }
-        res.extend_from_slice(&self.num_sync_queues.to_le_bytes());
+        let num_queues = ((self.num_sync_queues as u32) << Self::SYNC_QUEUES_SHIFT) | ((self.num_async_queues as u32) << Self::ASYNC_QUEUES_SHIFT) | ((self.num_notifiers as u32) << Self::NOTIFIER_QUEUES_SHIFT);
+        res.extend_from_slice(&num_queues.to_le_bytes());
         res.extend_from_slice(&self.num_sync_endpoints.to_le_bytes());
         res.extend_from_slice(&self.sync_queues.to_le_bytes());
         res.extend_from_slice(&self.sync_endpoints.to_le_bytes());
-        res.extend_from_slice(&self.num_async_queues.to_le_bytes());
         res.extend_from_slice(&self.num_async_endpoints.to_le_bytes());
         res.extend_from_slice(&self.async_queues.to_le_bytes());
         res.extend_from_slice(&self.async_endpoints.to_le_bytes());
+        res.extend_from_slice(&self.notifiers.to_le_bytes());
         res.extend_from_slice(&self.block_len.to_le_bytes());
         res.extend_from_slice(&self.pin_mask.to_le_bytes());
         Ok(res)
@@ -147,6 +168,7 @@ impl Program {
         println!("{}\tNum. Async Queues: {}", indent, self.num_async_queues);
         println!("{}\tNum. Sync Endpoints: {}", indent, self.num_sync_endpoints);
         println!("{}\tNum. Async Endpoints: {}", indent, self.num_async_endpoints);
+        println!("{}\tNum. Notifiers: {}", indent, self.num_notifiers);
         if self.num_sync_queues > 0 {
             println!("{}\tSync Queues Address: 0x{:x}", indent, self.sync_queues);
         }
@@ -158,6 +180,9 @@ impl Program {
         }
         if self.num_async_endpoints > 0 {
             println!("{}\tAsync Endpoints Address: 0x{:x}", indent, self.async_endpoints);
+        }
+        if self.num_notifiers > 0 {
+            println!("{}\tNotifier Address: 0x{:x}", indent, self.notifiers);
         }
         println!("{}\tBlock Length: {}", indent, self.block_len);
         if self.pin_mask != 0 {

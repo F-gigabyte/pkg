@@ -71,13 +71,13 @@ impl QueueRequirements {
         for i in 0..program.async_queues.len() {
             self.available_async_queues.insert(Endpoint {
                 name: program.name.to_string(),
-                queue: i as u32
+                queue: i as u8
             });
 
             self.queues.async_queue_offsets.insert(
                 Endpoint {
                     name: program.name.to_string(),
-                    queue: i as u32
+                    queue: i as u8
                 },
                 self.queues.async_queues_size
             );
@@ -86,7 +86,7 @@ impl QueueRequirements {
             self.queues.messages_offsets.insert(
                 Endpoint {
                     name: program.name.to_string(),
-                    queue: i as u32
+                    queue: i as u8
                 },
                 self.queues.messages_size
             );
@@ -108,6 +108,8 @@ impl QueueRequirements {
         self.queues.sync_endpoints.insert(program.name.to_string(), mem::replace(&mut program.sync_endpoints, Vec::new()));
         self.queues.async_endpoints.insert(program.name.to_string(), mem::replace(&mut program.async_endpoints, Vec::new()));
         self.queues.async_queues.insert(program.name.to_string(), mem::replace(&mut program.async_queues, Vec::new()));
+        self.queues.notifier_offsets.insert(program.name.to_string(), self.queues.notifier_size);
+        self.queues.notifier_size += (program.num_notifiers as usize) * SYNC_QUEUE_SIZE;
     }
 
     pub fn requirements_satisfied(&self) -> Result<(), PkgError> {
@@ -157,7 +159,9 @@ pub struct Queues {
     pub sync_endpoints: HashMap<String, Vec<Endpoint>>,
     pub async_endpoints: HashMap<String, Vec<Endpoint>>,
     pub async_queues: HashMap<String, Vec<usize>>,
-    pub message_len: usize
+    pub message_len: usize,
+    pub notifier_offsets: HashMap<String, usize>,
+    pub notifier_size: usize
 }
 
 impl Queues {
@@ -176,7 +180,9 @@ impl Queues {
             sync_endpoints: HashMap::new(),
             async_endpoints: HashMap::new(),
             async_queues: HashMap::new(),
-            message_len: message_len
+            message_len: message_len,
+            notifier_offsets: HashMap::new(),
+            notifier_size: 0
         }
     }
 
