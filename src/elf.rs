@@ -1,3 +1,21 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of Pkg.
+ *
+ * Pkg is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * Pkg is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with Pkg. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 use std::{collections::{HashMap, VecDeque}, fs::File, io::{Read, Write}, mem};
 
 use hamming::calc_symbol_len;
@@ -6,12 +24,19 @@ use object::{Endianness, Object, ObjectKind, ObjectSection, ObjectSymbol, Sectio
 
 use crate::{allocs::{Alloc, AllocType}, errors::PkgError, file_config::LoadedConfig, program::Program, region::Region, region_attr::RegionAttr, section_attr::SectionAttr, sections::SectionRename};
 
+/// Minimum MPU region size
 const MIN_REGION_SIZE: u32 = 256;
 
+/// Rounds up `val` to be 4 byte aligned  
+/// `val` is the value to round
 fn round_word(val: usize) -> usize {
     ((val + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) * mem::size_of::<u32>()
 }
 
+/// Figures out where in an elf file a region of memory is  
+/// `file` is the elf file to query  
+/// `phys_addr` is the address to lookup  
+/// `len` is the length of the memory region in bytes
 fn get_file_offset_from_phys_addr(file: &ElfFile32, phys_addr: usize, len: usize) -> Option<usize> {
     let end_addr = phys_addr + len;
     for header in file.elf_program_headers() {
@@ -25,7 +50,14 @@ fn get_file_offset_from_phys_addr(file: &ElfFile32, phys_addr: usize, len: usize
     None
 }
 
-pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
+/// Adds the stack argument addresses and the program CRCs to the elf file after all linking has been
+/// done  
+/// This must be done in this order as the CRCs need to be calculated for the final image data and
+/// not the code missing its final addresses  
+/// `programs` is the list of programs  
+/// `filename` is the name of the intermediary elf file  
+/// `outfile` is the path to the final elf file to generate
+pub fn add_final_args_and_crcs(programs: &[Program], filename: &str, outfile: &str) -> Result<(), PkgError> {
     let mut data = Vec::new();
     let mut file = File::open(&filename).map_err(|_| 
         PkgError::ReadError {
@@ -37,6 +69,25 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
             file: filename.to_string()
         }
     )?;
+    let file: ElfFile32 = ElfFile::parse(data.as_ref()).map_err(|_| 
+        PkgError::ReadError {
+            file: filename.to_string()
+        }
+    )?;
+    let mut update_table = Vec::new();
+    // Write stack argument addresses
+    for program in programs {
+        if let Some(stack_args_addr) = program.stack_args_addr && let Some(sp) = program.sp {
+            let data_offset = get_file_offset_from_phys_addr(&file, stack_args_addr, 4).unwrap();
+            update_table.push((data_offset, program.regions[sp as usize].virt_addr + program.regions[sp as usize].actual_len));
+        }
+    }
+    for (index, stack_args) in update_table {
+        let stack_args = stack_args.to_le_bytes();
+        for (i, byte) in stack_args.iter().enumerate() {
+            data[index + i] = *byte;
+        }
+    }
     let file: ElfFile32 = ElfFile::parse(data.as_ref()).map_err(|_| 
         PkgError::ReadError {
             file: filename.to_string()
@@ -84,6 +135,7 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
             }
         }
     }
+    // Write CRC data
     for (index, crc) in update_table {
         let crc = crc.to_le_bytes();
         for (i, byte) in crc.iter().enumerate() {
@@ -103,6 +155,15 @@ pub fn add_final_crcs(filename: &str, outfile: &str) -> Result<(), PkgError> {
     Ok(())
 }
 
+/// Reads a relocatable elf file and extracts the different regions to allocate  
+/// `name` is the program's name  
+/// `file` is the elf file data along with configuration data  
+/// `allocs` is a list of ordered allocation requests  
+/// `renames` is a hash map of program data including the program section renames and a list of all
+/// program sections  
+/// `codes_offsets` is a hash map containing the hamming code offsets for different regions  
+/// `codes_size` is the current size of all the hamming codes  
+/// Returns the updated `codes_size` on success or a `PkgError` on failure
 pub fn get_file_regions(
     name: &str,
     file: &LoadedConfig, 
@@ -140,6 +201,9 @@ pub fn get_file_regions(
     let mut file_symbols = Vec::new();
 
     let mut entry_sec = None;
+    let mut stack_args = None;
+
+    let kernel = name == "kernel";
 
     for symbol in file.data.symbols() {
         let name = symbol.name().map_err(|_| 
@@ -150,6 +214,18 @@ pub fn get_file_regions(
         let addr = symbol.address() as usize;
         if addr == entry_addr && symbol.elf_symbol().st_type() == STT_FUNC {
             entry_sec = symbol.section_index();
+        }
+        if name == "_stack_args" && !kernel {
+            if let Some(index) = symbol.section_index() && let Ok(sec) = file.data.section_by_index(index) {
+                let name = sec.name().map_err(|_| 
+                    PkgError::NoStringTable {
+                        file: file.filename.to_string() 
+                    }
+                )?;
+                if name == ".rodata" {
+                    stack_args = Some(symbol.address());
+                }
+            }
         }
         file_symbols.push(name);
     }
@@ -172,7 +248,7 @@ pub fn get_file_regions(
             if sec.sh_flags(Endianness::Little) & SHF_WRITE != 0 {
                 flags.set_write(true);
             }
-            let load = flags.write() || name == "kernel" && region_name == ".text.flash";
+            let load = flags.write();
 
             // rename section to be filename.section_name so can produce a linker script for it
             // later 
@@ -186,7 +262,7 @@ pub fn get_file_regions(
                 None
             };
             let actual_size = size;
-            let size = if name == "kernel" { 
+            let size = if kernel { 
                 size 
             } else { 
                 size.next_power_of_two().max(MIN_REGION_SIZE as usize) 
@@ -198,7 +274,7 @@ pub fn get_file_regions(
                     flags: err
                 }
             )?;
-            let alignment = if name == "kernel" || load {
+            let alignment = if kernel || load {
                 4
             } else {
                 size
@@ -225,7 +301,7 @@ pub fn get_file_regions(
             let alloc = Alloc {
                 name: name.to_string(),
                 region: region_name.to_string(),
-                queue: false,
+                no_section: false,
                 store: region_name != ".bss",
                 attr,
                 load,
@@ -233,6 +309,15 @@ pub fn get_file_regions(
                 size,
                 actual_size,
                 alignment,
+                stack_args: if let Some(stack_args) = stack_args {
+                    if region_name == ".rodata" {
+                        Some(stack_args as usize)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             };
             let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
             allocs.insert(index, alloc);
@@ -242,13 +327,13 @@ pub fn get_file_regions(
     if let Some(stack) = file.data.symbol_by_name("__stack_size") {
         // if have reserved a stack, allocate this as well
         let actual_stack_size = round_word(stack.address() as usize);
-        let stack_size = if name == "kernel" {
+        let stack_size = if kernel {
             actual_stack_size
         } else {
             actual_stack_size.next_power_of_two().max(MIN_REGION_SIZE as usize)
         };
-        let stack_alignment = if name == "kernel" {
-            4
+        let stack_alignment = if kernel {
+            8
         } else {
             stack_size
         };
@@ -269,7 +354,7 @@ pub fn get_file_regions(
         let alloc = Alloc { 
             name: name.to_string(),
             region: ".stack".to_string(), 
-            queue: false,
+            no_section: false,
             store: false,
             attr: RegionAttr::RW, 
             load: true, 
@@ -277,6 +362,7 @@ pub fn get_file_regions(
             size: stack_size, 
             actual_size: actual_stack_size,
             alignment: stack_alignment,
+            stack_args: None
         };
         let index = allocs.binary_search(&alloc).unwrap_or_else(|val| val);
         allocs.insert(index, alloc);

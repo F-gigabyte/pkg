@@ -1,25 +1,54 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of Pkg.
+ *
+ * Pkg is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * Pkg is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with Pkg. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 use std::{cmp::Ordering, collections::{HashMap, HashSet}, fs, mem, path::Path, process::Command};
+
+use tempfile::TempDir;
 
 use crate::{allocs::AllocInfo, cmds::check_cmd, errors::PkgError, file_config::{Endpoint, ProgramConfig}};
 
+/// Size of an endpoint in bytes
 const ENDPOINT_SIZE: usize = 4;
 
-// length of sync queue in bytes
+/// Size of a synchronous queue in bytes
 const SYNC_QUEUE_SIZE: usize = 16;
 
-// length of async queue in bytes
+/// Size of an asynchronous queue in bytes
 const ASYNC_QUEUE_SIZE: usize = 28;
 
-// message header length in bytes
+/// Message header size in bytes
 const MESSAGE_HEADER_SIZE: usize = 16;
 
+/// Message header alignment in bytes
+const MESSAGE_HEADER_ALIGNMENT: usize = 4;
+
+/// An asynchronous queue
 struct AsyncQueue {
+    /// Asynchronous queue buffer address
     pub buffer: u32,
+    /// Asynchronous queue buffer length in number of messages
     pub buffer_len: u32,
+    /// Asynchronous queue message length in bytes
     pub message_len: u32,
 }
 
 impl AsyncQueue {
+    /// Converts the asynchronous queue into a byte stream
     fn serialise(&self) -> Vec<u8> {
         let mut res = Vec::new();
         res.extend_from_slice(&self.buffer.to_le_bytes());
@@ -33,15 +62,23 @@ impl AsyncQueue {
     }
 }
 
+/// Represents the queue requirements
 pub struct QueueRequirements {
+    /// The synchronous queues available
     available_sync_queues: HashSet<Endpoint>,
+    /// The asynchronous queues available
     available_async_queues: HashSet<Endpoint>,
+    /// The needed synchronous queues
     needed_sync_endpoints: HashSet<Endpoint>,
+    /// The needed asynchronous queues
     needed_async_endpoints: HashSet<Endpoint>,
+    /// Queue data
     queues: Queues,
 }
 
 impl QueueRequirements {
+    /// Creates a new `QueueRequirements`  
+    /// `message_len` is the message length for asynchronous queues
     pub fn new(message_len: usize) -> Self {
         Self {
             available_async_queues: HashSet::new(),
@@ -52,6 +89,8 @@ impl QueueRequirements {
         }
     }
 
+    /// Adds a program's queue and endpoint data to the queue requirements  
+    /// `program` is the program whose queue data should be added
     pub fn add_program_queues(&mut self, program: &mut ProgramConfig) {
         for i in 0..program.num_sync_queues {
             self.available_sync_queues.insert(Endpoint {
@@ -90,7 +129,8 @@ impl QueueRequirements {
                 },
                 self.queues.messages_size
             );
-            self.queues.messages_size += program.async_queues[i] * (self.queues.message_len + MESSAGE_HEADER_SIZE);
+            let message_size = ((self.queues.message_len + MESSAGE_HEADER_SIZE + MESSAGE_HEADER_ALIGNMENT - 1) / MESSAGE_HEADER_ALIGNMENT) * MESSAGE_HEADER_ALIGNMENT;
+            self.queues.messages_size += program.async_queues[i] * message_size;
         }
         self.queues.sync_endpoints_offsets.insert(program.name.to_string(), self.queues.sync_endpoints_size);
         for endpoint in &program.sync_endpoints {
@@ -112,6 +152,7 @@ impl QueueRequirements {
         self.queues.notifier_size += (program.num_notifiers as usize) * SYNC_QUEUE_SIZE;
     }
 
+    /// Checks whether the queue requirements have been satisfied
     pub fn requirements_satisfied(&self) -> Result<(), PkgError> {
         let sync_missing: Vec<_> = self
             .needed_sync_endpoints
@@ -140,31 +181,51 @@ impl QueueRequirements {
         Ok(())
     }
 
+    /// Returns the queue data for later, consuming `self`
     pub fn get_queues(self) -> Queues {
         self.queues
     }
 }
 
+/// Queue data
 pub struct Queues {
+    /// Synchronous queue offsets
     pub sync_queue_offsets: HashMap<Endpoint, usize>,
+    /// Synchronous queues size in bytes
     pub sync_queues_size: usize,
+    /// Asynchronous queue offsets
     pub async_queue_offsets: HashMap<Endpoint, usize>,
+    /// Asynchronous queues size in bytes
     pub async_queues_size: usize,
+    /// Synchronous endpoints offsets
     pub sync_endpoints_offsets: HashMap<String, usize>,
+    /// Synchronous endpoints size in bytes
     pub sync_endpoints_size: usize,
+    /// Asynchronous endpoints offsets
     pub async_endpoints_offsets: HashMap<String, usize>,
+    /// Asynchronous endpoints size in bytes
     pub async_endpoints_size: usize,
+    /// Asynchronous queue message offsets
     pub messages_offsets: HashMap<Endpoint, usize>,
+    /// Asynchronous queue messages size in bytes
     pub messages_size: usize,
+    /// Synchronous endpoints
     pub sync_endpoints: HashMap<String, Vec<Endpoint>>,
+    /// Asynchronous endpoints
     pub async_endpoints: HashMap<String, Vec<Endpoint>>,
+    /// Asynchronous queues
     pub async_queues: HashMap<String, Vec<usize>>,
+    /// Asynchronous Message length in bytes
     pub message_len: usize,
+    /// Notifier queue offsets
     pub notifier_offsets: HashMap<String, usize>,
+    /// Notifier queues size in bytes
     pub notifier_size: usize
 }
 
 impl Queues {
+    /// Creates a new `Queues`  
+    /// `message_len` is the asynchronous queue message length in bytes
     pub fn new(message_len: usize) -> Self {
         Self { 
             sync_queue_offsets: HashMap::new(), 
@@ -186,6 +247,8 @@ impl Queues {
         }
     }
 
+    /// Serialises the synchronous endpoints data into a byte stream  
+    /// `alloc_info` is the allocation information
     fn get_sync_endpoints_data(&self, alloc_info: &AllocInfo) -> Vec<u8> {
         let mut sync_endpoints: Vec<_> = self.sync_endpoints_offsets.iter().collect();
         sync_endpoints.sort_by(|a, b| -> Ordering {
@@ -209,6 +272,8 @@ impl Queues {
         sync_endpoints_bytes
     }
 
+    /// Serialises the asynchronous endpoints data into a byte stream  
+    /// `alloc_info` is the allocation information
     fn get_async_endpoints_data(&self, alloc_info: &AllocInfo) -> Vec<u8> {
         let mut async_endpoints: Vec<_> = self.async_endpoints_offsets.iter().collect();
         async_endpoints.sort_by(|a, b| -> Ordering {
@@ -232,6 +297,8 @@ impl Queues {
         async_endpoints_bytes
     }
 
+    /// Serialises the asynchronous queues data into a byte stream  
+    /// `alloc_info` is the allocation information
     fn get_async_queues_data(&self, alloc_info: &AllocInfo) -> Vec<u8> {
         let mut async_queues_vec: Vec<_> = self.async_queue_offsets.iter().collect();
         async_queues_vec.sort_by(|a, b| -> Ordering {
@@ -258,11 +325,17 @@ impl Queues {
         async_queues_bytes
     }
 
-    pub fn write_sync_enpoints_file(&self, path: &Path, alloc_info: &AllocInfo, objcopy: &str) -> Result<Option<String>, PkgError> {
+    /// Creates an elf object file containing the synchronous endpoints data for linking later  
+    /// `root` is the root of the temporary directory  
+    /// `alloc_info` is the allocation information  
+    /// `objcopy` is the objcopy binary to use
+    /// Returns the name of the file if successfully created, `None` if successful but no file was
+    /// created and a `PkgError` on error
+    pub fn write_sync_enpoints_file(&self, root: &TempDir, alloc_info: &AllocInfo, objcopy: &str) -> Result<Option<String>, PkgError> {
         let sync_endpoints_bytes = self.get_sync_endpoints_data(alloc_info);
         if sync_endpoints_bytes.len() > 0 {
-            let sync_endpoints_file_bin = path.join("sync_endpoints.bin");
-            let sync_endpoints_file = path.join("sync_endpoints.o").to_string_lossy().to_string().to_string();
+            let sync_endpoints_file_bin = root.path().join("sync_endpoints.bin");
+            let sync_endpoints_file = root.path().join("sync_endpoints.o").to_string_lossy().to_string().to_string();
             fs::write(&sync_endpoints_file_bin, sync_endpoints_bytes).map_err(|_| 
                 PkgError::WriteError {
                     file: sync_endpoints_file_bin.to_str().unwrap().to_string()
@@ -290,11 +363,17 @@ impl Queues {
         }
     }
 
-    pub fn write_async_endpoints_file(&self, path: &Path, alloc_info: &AllocInfo, objcopy: &str) -> Result<Option<String>, PkgError> {
+    /// Creates an elf object file containing the asynchronous endpoints data for linking later  
+    /// `root` is the root of the temporary directory  
+    /// `alloc_info` is the allocation information  
+    /// `objcopy` is the objcopy binary to use
+    /// Returns the name of the file if successfully created, `None` if successful but no file was
+    /// created and a `PkgError` on error
+    pub fn write_async_endpoints_file(&self, root: &TempDir, alloc_info: &AllocInfo, objcopy: &str) -> Result<Option<String>, PkgError> {
         let async_endpoints_bytes = self.get_async_endpoints_data(alloc_info);
         if async_endpoints_bytes.len() > 0 {
-            let async_endpoints_file_bin = path.join("async_endpoints.bin");
-            let async_endpoints_file = path.join("async_endpoints.o").to_string_lossy().to_string().to_string();
+            let async_endpoints_file_bin = root.path().join("async_endpoints.bin");
+            let async_endpoints_file = root.path().join("async_endpoints.o").to_string_lossy().to_string().to_string();
             fs::write(&async_endpoints_file_bin, async_endpoints_bytes).map_err(|_| 
                 PkgError::WriteError {
                     file: async_endpoints_file_bin.to_str().unwrap().to_string()
@@ -322,11 +401,17 @@ impl Queues {
         }
     }
 
-    pub fn write_async_queues_file(&self, path: &Path, alloc_info: &AllocInfo, objcopy: &str) -> Result<Option<String>, PkgError> {
+    /// Creates an elf object file containing the asynchronous queues data for linking later  
+    /// `root` is the root of the temporary directory  
+    /// `alloc_info` is the allocation information  
+    /// `objcopy` is the objcopy binary to use
+    /// Returns the name of the file if successfully created, `None` if successful but no file was
+    /// created and a `PkgError` on error
+    pub fn write_async_queues_file(&self, root: &TempDir, alloc_info: &AllocInfo, objcopy: &str) -> Result<Option<String>, PkgError> {
         let async_queues_bytes = self.get_async_queues_data(alloc_info);
         if async_queues_bytes.len() > 0 {
-            let async_queues_file_bin = path.join("async_queues.bin");
-            let async_queues_file = path.join("async_queues.o").to_string_lossy().to_string().to_string();
+            let async_queues_file_bin = root.path().join("async_queues.bin");
+            let async_queues_file = root.path().join("async_queues.o").to_string_lossy().to_string().to_string();
             fs::write(&async_queues_file_bin, async_queues_bytes).map_err(|_| 
                 PkgError::WriteError {
                     file: async_queues_file_bin.to_str().unwrap().to_string()

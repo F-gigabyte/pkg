@@ -1,51 +1,119 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of Pkg.
+ *
+ * Pkg is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * Pkg is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with Pkg. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use capitalize::Capitalize;
 
 use crate::{drivers::lookup_driver, errors::PkgError, region::Region};
 
+/// Represents a program that will be in the program table
 #[derive(Debug)]
 pub struct Program {
+    /// The program's name
     pub name: String,
+    /// The program's PID
     pub pid: u32,
+    /// The program's priority
     pub priority: u8,
+    /// The program's device
     pub driver: u16,
+    /// The program's interrupts
     pub inter: [u8; 4],
+    /// The program's stack region
     pub sp: Option<u32>,
+    /// The program's entry point
     pub entry: Option<u32>,
+    /// The program's regions
     pub regions: [Region; 8],
+    /// The number of synchronous queues this program has
     pub num_sync_queues: u8,
+    /// The number of synchronous endpoints this program has
     pub num_sync_endpoints: u32,
+    /// The address of this program's synchronous queues
     pub sync_queues: u32,
+    /// The address of this program's synchronous endpoints
     pub sync_endpoints: u32,
+    /// The number of asynchronous queues this program has
     pub num_async_queues: u8,
+    /// The number of asynchronous endpoints this program has
     pub num_async_endpoints: u32,
+    /// The address of this program's asynchronous queues
     pub async_queues: u32,
+    /// The address of this program's asynchronous endpoints
     pub async_endpoints: u32,
+    /// The number of notifier queues this program has
     pub num_notifiers: u8,
+    /// The address of this program's notifier queues
     pub notifiers: u32,
+    /// The program's hamming block length
     pub block_len: u32,
-    pub pin_mask: u32
+    /// The program's allocated pins mask
+    pub pin_mask: u32,
+    // not serialised but has end of stack address placed here
+    /// The address of the program's stack arguments if present
+    pub stack_args_addr: Option<usize>,
 }
 
+/// Next PID to allocate
 static PID: AtomicU32 = AtomicU32::new(0);
 
 impl Program {
+    /// Priority shift
     const PRIORITY_SHIFT: usize = 0;
+    /// Driver shift
     const DRIVER_SHIFT: usize = 16;
 
+    /// Priority mask
     const PRIORITY_MASK: u32 = 0xff << Self::PRIORITY_SHIFT;
+    /// Driver mask
     const DRIVER_MASK: u32 = 0xffff << Self::DRIVER_SHIFT;
+    /// No interrupt
     const INTERRUPT_NONE: u8 = 0xff;
 
+    /// Number of synchronous queues shift
     const SYNC_QUEUES_SHIFT: usize = 0;
+    /// Number of asynchronous queues shift
     const ASYNC_QUEUES_SHIFT: usize = 8;
+    /// Number of notifier queues shift
     const NOTIFIER_QUEUES_SHIFT: usize = 16;
 
+    /// Number of synchronous queues mask
     const SYNC_QUEUES_MASK: u32 = 0xff << Self::SYNC_QUEUES_SHIFT;
+    /// Number of asynchronous queues mask
     const ASYNC_QUEUES_MASK: u32 = 0xff << Self::ASYNC_QUEUES_SHIFT;
+    /// Number of notifier queues mask
     const NOTIFIER_QUEUES_MASK: u32 = 0xff << Self::NOTIFIER_QUEUES_SHIFT;
 
+    /// Creates a new `Program`  
+    /// `name` is the program name  
+    /// `priority` is the program's priority  
+    /// `driver` is the program's device  
+    /// `inter` is a list of the program's interrupts  
+    /// `num_sync_queues` is the number of synchronous queues this program has  
+    /// `num_sync_endpoints` is the number of synchronous endpoints this program has  
+    /// `num_async_queues` is the number of asynchronous queues this program has  
+    /// `num_async_endpoints` is the number of asynchronous endpoints this program has  
+    /// `num_notifiers` is the number of notifier queues this program has  
+    /// `regions` is a list of all the memory regions this program has  
+    /// `block_len` is the program's hamming block length  
+    /// `pin_mask` is a bit mask of all the pins this program has been allocated  
+    /// `stack_args_addr` is the address of this program's stack arguments if present
     pub fn new(
         name: String,
         priority: u8,
@@ -58,7 +126,8 @@ impl Program {
         num_notifiers: u8,
         regions: [Region; 8],
         block_len: u32,
-        pin_mask: u32
+        pin_mask: u32,
+        stack_args_addr: Option<usize>
     ) -> Self {
 
         Self { 
@@ -81,14 +150,19 @@ impl Program {
             num_notifiers,
             notifiers: 0,
             block_len,
-            pin_mask 
+            pin_mask, 
+            stack_args_addr
         }
     }
 
+    /// Checks if a name is reserved  
+    /// `name` is the name to check
     pub fn is_reserved_name(name: &str) -> bool {
         matches!(name, "kernel" | "sync" | "async" | "program_table" | "procs" | "" | "codes" | "args")
     }
 
+    /// Locates an unallocated region if possible  
+    /// Returns the region index and a mutable reference to the region if found
     pub fn find_empty_region(&mut self) -> Option<(usize, &mut Region)> {
         for (i, region) in self.regions.iter_mut().enumerate() {
             if !region.is_enabled() {
@@ -98,10 +172,12 @@ impl Program {
         None
     }
 
+    /// Returns the size of a program in bytes
     pub const fn get_prog_size() -> usize {
         Region::get_region_size() * 8 + 15 * std::mem::size_of::<u32>()
     }
 
+    /// Converts the program into a byte stream
     pub fn serialise(&self) -> Result<Vec<u8>, PkgError> {
         let mut res = Vec::new();
         res.extend_from_slice(&(self.pid.to_le_bytes()));
@@ -138,6 +214,8 @@ impl Program {
         Ok(res)
     }
 
+    /// Displays the program in a human readable form  
+    /// `indent` is the number of indentations to use on top of other indentation
     pub fn display(&self, indent: usize) {
         let indent_len = indent;
         let indent = "\t".repeat(indent);

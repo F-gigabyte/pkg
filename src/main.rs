@@ -1,10 +1,29 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of Pkg.
+ *
+ * Pkg is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * Pkg is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with Pkg. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 use std::{cmp::Ordering, collections::HashMap, env, fs::{self, File, read_dir}, io::Read, path::Path, process::{Command, exit}};
 
 use object::read::elf::ElfFile;
 
 use ansi_term::Color::Red;
+use tempfile::TempDir;
 
-use crate::{allocs::{MemMap, add_error_codes, default_allocs, do_allocs}, args::Args, cmds::check_cmd, driver_args::DriverArgs, drivers::{DriverError, PinError, find_driver, take_pins}, elf::{add_final_crcs, get_file_regions}, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
+use crate::{allocs::{MemMap, add_error_codes, default_allocs, do_allocs}, args::Args, cmds::check_cmd, driver_args::DriverArgs, drivers::{DriverError, PinError, find_driver, take_pins}, elf::{add_final_args_and_crcs, get_file_regions}, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
 
 pub mod drivers;
 pub mod queues;
@@ -29,6 +48,10 @@ const FLASH_LEN: usize = 2048 * 1024;
 const RAM_START: usize = 0x20000000;
 const RAM_LEN: usize = 264 * 1024;
 
+/// Attempts to find a programs test file  
+/// `dir` is the directory to the program's debug or release directory  
+/// `name` is the program's executable name  
+/// Returns the file's path on success or a `PkgError` on error
 fn find_file(dir: &Path, name: &str) -> Result<String, PkgError> {
     let test_dir = dir.join("deps");
     let fingerprint_dir = dir.join(".fingerprint");
@@ -73,10 +96,13 @@ fn find_file(dir: &Path, name: &str) -> Result<String, PkgError> {
     }
 }
 
+/// Runs the application
 fn run() -> Result<(), PkgError> {
+    // parse arguments and config
     let args = Args::parse();
     let config = FileConfig::parse(&args.cmd_args.config_file)?;
 
+    // load later data
     let mut sections = Vec::new();
     let mut renames = HashMap::new();
     let mut file_data = HashMap::new();
@@ -85,6 +111,7 @@ fn run() -> Result<(), PkgError> {
 
     let message_len = config.async_message_len as usize;
 
+    // check message length
     if message_len & 0x3 != 0 {
         return Err(
             PkgError::BadAsyncMessageLen {
@@ -96,6 +123,8 @@ fn run() -> Result<(), PkgError> {
     let mut queue_requirements = QueueRequirements::new(message_len);
 
     {
+        // get kernel data
+        // determine if this is a debug or release build
         let release = if let Some(release) = args.cmd_args.kernel_release {
             release
         } else {
@@ -111,6 +140,7 @@ fn run() -> Result<(), PkgError> {
         } else {
             Path::new(&config.debug_path).to_path_buf()
         };
+        // locate required files
         let filename = if test {
             find_file(&path, &config.kernel.exec)?
         } else {
@@ -128,12 +158,14 @@ fn run() -> Result<(), PkgError> {
         )?;
         file_data.insert("kernel".to_string(), (filename, 0, None, 0, data.len(), 0));
     }
+    // get programs data
     let program_path = if args.cmd_args.release {
         Path::new(&config.release_path).to_path_buf()
     } else {
         Path::new(&config.debug_path).to_path_buf()
     };
     for mut program_config in config.programs {
+        // check program name is valid
         if Program::is_reserved_name(&program_config.name) {
             return Err(
                 PkgError::ParseError {
@@ -147,6 +179,7 @@ fn run() -> Result<(), PkgError> {
                 }
             );
         }
+        // get program regions and device information
         let mut regions = [const { Region::default() }; 8];
         let inter;
         let driver_num;
@@ -168,28 +201,28 @@ fn run() -> Result<(), PkgError> {
                     }
                 }
             })?; 
-            if let Some(pins) = &program_config.pins {
-                take_pins(&mut driver_args, pins, &driver).map_err(|err| {
-                    match err {
-                        PinError::Taken(taken) => {
-                            PkgError::PinsTaken { 
-                                name: program_config.name.to_string(), 
-                                driver: driver_name.to_string(), 
-                                pins: taken 
-                            }
-                        },
-                        PinError::Invalid(invalid) => {
-                            PkgError::InvalidPins { 
-                                name: program_config.name.to_string(), 
-                                driver: driver_name.to_string(), 
-                                pins: invalid 
-                            }
+            let empty_pins = vec![];
+            let pins = program_config.pins.as_ref().unwrap_or(&empty_pins);
+            take_pins(&mut driver_args, &pins, &driver).map_err(|err| {
+                match err {
+                    PinError::Taken(taken) => {
+                        PkgError::PinsTaken { 
+                            name: program_config.name.to_string(), 
+                            driver: driver_name.to_string(), 
+                            pins: taken 
+                        }
+                    },
+                    PinError::Invalid(invalid) => {
+                        PkgError::InvalidPins { 
+                            name: program_config.name.to_string(), 
+                            driver: driver_name.to_string(), 
+                            pins: invalid 
                         }
                     }
-                })?;
-                for pin in pins {
-                    pin_mask |= 1 << pin;
                 }
+            })?;
+            for pin in pins {
+                pin_mask |= 1 << pin;
             }
             regions[0] = Region { 
                 name: None,
@@ -210,6 +243,7 @@ fn run() -> Result<(), PkgError> {
             driver_num = 0;
         };
 
+        // check queue lengths are valid
         if program_config.num_sync_queues > 32 {
             return Err(PkgError::ParseError { 
                 file: program_config.name.to_string()
@@ -229,6 +263,7 @@ fn run() -> Result<(), PkgError> {
             });
         }
         
+        // create program object for each program
         let program = Program::new(
             program_config.name.to_string(),
             program_config.priority, 
@@ -249,9 +284,11 @@ fn run() -> Result<(), PkgError> {
             program_config.num_notifiers,
             regions,
             program_config.block_len,
-            pin_mask
+            pin_mask,
+            None
         );
 
+        // check programs each have a unique name
         if let Some(program) = programs.insert(program.name.to_string(), program) {
             return Err(
                 PkgError::RepeatedProgram {
@@ -260,6 +297,7 @@ fn run() -> Result<(), PkgError> {
             );
         }
 
+        // add program queues
         queue_requirements.add_program_queues(&mut program_config);
 
         let filename = if args.cmd_args.test {
@@ -285,6 +323,7 @@ fn run() -> Result<(), PkgError> {
     println!("Have pin functions {:#?}", driver_args.pin_func);
     println!("Have pin pads {:#x?}", driver_args.pads);
 
+    // check queue requirements
     queue_requirements.requirements_satisfied()?;
     let queues = queue_requirements.get_queues();
 
@@ -304,6 +343,7 @@ fn run() -> Result<(), PkgError> {
         });
     }
 
+    // allocate regions
     let mut flash = MemMap::new("Flash", FLASH_START, FLASH_LEN);
     let mut ram = MemMap::new("RAM", RAM_START, RAM_LEN);
     let mut allocs = default_allocs(
@@ -324,39 +364,35 @@ fn run() -> Result<(), PkgError> {
         codes_size = s0;
     }
 
+    // add error code region
     add_error_codes(&mut allocs, codes_size);
 
     let alloc_info = do_allocs(allocs, &mut ram, &mut flash, &mut sections, &mut programs)?;
 
-    let username = whoami::username().unwrap();
-    let path = format!("/tmp/pkg_{}", username);
-    let path = Path::new(&path);
-    if !path.exists() {
-        fs::create_dir(path).map_err(|_| 
-            PkgError::MkdirError {
-                path: path.to_str().unwrap().to_string() 
-            }
-        )?;
-    }
+    let root = TempDir::new().map_err(|_| PkgError::MkdirError)?;
     let mut link_files = Vec::new();
     print_renames(&renames);
+    // rename file sections
     for (file, (secs, symbols)) in renames {
-        rename_file_sections(&args.env_args.objcopy, path, &file, &secs, &symbols, &mut link_files)?;
+        rename_file_sections(&args.env_args.objcopy, &root, &file, &secs, &symbols, &mut link_files)?;
         // based on answer by embradded on https://stackoverflow.com/questions/68622938/new-versions-of-ld-cannot-take-elf-files-as-input-to-link accessed 11/02/2026
     }
     
+    // display allocation memory map
     ram.display(0);
     flash.display(0);
    
-    let sync_endpoints_file = queues.write_sync_enpoints_file(path, &alloc_info, &args.env_args.objcopy)?;
+    // write queue files
+    let sync_endpoints_file = queues.write_sync_enpoints_file(&root, &alloc_info, &args.env_args.objcopy)?;
 
-    let async_endpoints_file = queues.write_async_endpoints_file(path, &alloc_info, &args.env_args.objcopy)?;
+    let async_endpoints_file = queues.write_async_endpoints_file(&root, &alloc_info, &args.env_args.objcopy)?;
 
-    let async_queues_file = queues.write_async_endpoints_file(path, &alloc_info, &args.env_args.objcopy)?;
+    let async_queues_file = queues.write_async_queues_file(&root, &alloc_info, &args.env_args.objcopy)?;
 
     let mut prog_table_bytes = Vec::new();
     prog_table_bytes.extend_from_slice(&(programs.len() as u32).to_le_bytes());
     let mut programs = Vec::from_iter(programs.into_values());
+    // finalise program queue and endpoint locations
     // plug in locations of queues, endpoints and error codes
     for program in &mut programs {
         if program.num_sync_endpoints > 0 {
@@ -373,7 +409,7 @@ fn run() -> Result<(), PkgError> {
             program.sync_queues = alloc_info.sync_queues_virt as u32 + queues.sync_queue_offsets[&endpoint] as u32;
         }
         if program.num_async_queues > 0 {
-            program.async_endpoints = alloc_info.async_queues_virt as u32 + queues.async_queue_offsets[&endpoint] as u32;
+            program.async_queues = alloc_info.async_queues_virt as u32 + queues.async_queue_offsets[&endpoint] as u32;
         }
 
         if program.num_notifiers > 0 {
@@ -391,6 +427,7 @@ fn run() -> Result<(), PkgError> {
             }
         }
     }
+    // sort programs by device
     programs.sort_by(|p1, p2| -> Ordering {
         if p1.driver > p2.driver {
             Ordering::Greater
@@ -400,11 +437,12 @@ fn run() -> Result<(), PkgError> {
             Ordering::Less
         }
     });
+    // write program table to file
     for program in &programs {
         prog_table_bytes.extend_from_slice(&program.serialise()?);
     }
-    let prog_table_file_bin = path.join("prog_table.bin");
-    let prog_table_file = path.join("prog_table.o").to_string_lossy().to_string().to_string();
+    let prog_table_file_bin = root.path().join("prog_table.bin");
+    let prog_table_file = root.path().join("prog_table.o").to_string_lossy().to_string().to_string();
     fs::write(&prog_table_file_bin, prog_table_bytes).map_err(|_| 
         PkgError::WriteError { 
             file: prog_table_file_bin.to_str().unwrap().to_string() 
@@ -428,8 +466,9 @@ fn run() -> Result<(), PkgError> {
         }
     )?;
 
-    let args_file_bin = path.join("args.bin");
-    let args_file = path.join("args.o").to_string_lossy().to_string().to_string();
+    // write kernel driver args to file
+    let args_file_bin = root.path().join("args.bin");
+    let args_file = root.path().join("args.o").to_string_lossy().to_string().to_string();
     fs::write(&args_file_bin, driver_args.serialise()).map_err(|_|
         PkgError::WriteError { 
             file: args_file_bin.to_str().unwrap().to_string() 
@@ -453,8 +492,9 @@ fn run() -> Result<(), PkgError> {
     )?;
 
 
+    // create the final link file
     let link_file = create_link_file(
-        &path, 
+        &root, 
         &sections, 
         &alloc_info,
         &prog_table_file,
@@ -467,7 +507,7 @@ fn run() -> Result<(), PkgError> {
     for file in link_files {
         cmd.arg(file);
     }
-    let exe_file = path.join("small_os.o");
+    let exe_file = root.path().join("small_os.o");
     cmd
         .arg("-T")
         .arg(link_file)
@@ -483,15 +523,19 @@ fn run() -> Result<(), PkgError> {
         }
     )?;
     
-    add_final_crcs(exe_file.as_os_str().to_str().unwrap(), &args.cmd_args.outfile)?;
+    // patch in stack argument locations and CRCs
+    add_final_args_and_crcs(&programs, exe_file.as_os_str().to_str().unwrap(), &args.cmd_args.outfile)?;
 
+    // display the program information
     for program in programs {
         program.display(0);
     }
     Ok(())
 }
 
+/// Main function
 fn main() {
+    // attempt to run and print error on failure
     match run() {
         Ok(()) => {},
         Err(err) => {

@@ -1,95 +1,139 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of Pkg.
+ *
+ * Pkg is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * Pkg is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with Pkg. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 use std::fmt;
 
 use crate::{Endpoint, section_attr::SectionAttr};
 
+/// Different Pkg Errors
 #[derive(Debug)]
 pub enum PkgError {
+    /// Error reading file
     ReadError {
         file: String
     },
+    /// File doesn't exist
     NoFile {
         file: String
     },
+    /// There are multiple files matching a condition
     MultipleFiles {
         file: String,
         files: Vec<String>
     },
+    /// Error writing to a file
     WriteError {
         file: String
     },
-    MkdirError {
-        path: String
-    },
+    /// Error creating a directory
+    MkdirError,
+    /// Error parsing a file
     ParseError {
         file: String
     },
+    /// No string table in an elf file
     NoStringTable {
         file: String
     },
+    /// Elf file is non-relocatable
     NonRelocatable {
         file: String
     },
+    /// No space for allocating a region
     NoSpace {
         name: String, 
         region: String
     },
+    /// Too many sections in an elf file
     TooManySections {
         name: String
     },
+    /// Invalid arguments were specified
     InvalidArgs {
         name: String
     },
+    /// No kernel entry point
     NoKernelEntry,
+    /// No kernel stack
     NoKernelStack,
+    /// No program entry point
     NoProgramEntry {
         name: String
     },
+    /// No program stack
     NoProgramStack {
         name: String
     },
+    /// Error running command
     CmdError {
         cmd: String
     },
+    /// Invalid region permissions specified
     InvalidRegionPermissions {
         name: String, 
         region: String, 
         flags: SectionAttr
     },
+    /// Program doesn't exist
     NoProgram {
         name: String
     },
+    /// Device doesn't exist
     InvalidDriver {
         name: String, 
         driver: String
     },
+    /// Device has already been allocated
     DriverTaken {
         name: String, 
         driver: String
     },
+    /// Invalid pins were specified
     InvalidPins {
         name: String,
         driver: String,
         pins: Vec<u8>
     },
+    /// Pins have already been allocated
     PinsTaken {
         name: String,
         driver: String,
         pins: Vec<u8>
     },
+    /// This program has the same name as a previous program
     RepeatedProgram {
         name: String
     },
+    /// Queues don't exist for the following endpoints
     MissingSyncQueues {
         queues: Vec<Endpoint>
     },
+    /// Queues don't exist for the following asynchronous endpoints
     MissingAsyncQueues {
         queues: Vec<Endpoint>
     },
+    /// Invalid asynchronous message length was specified
     BadAsyncMessageLen {
         len: usize
     }
 }
 
+/// Formats the `PkgError`
 impl fmt::Display for PkgError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -137,8 +181,8 @@ impl fmt::Display for PkgError {
             PkgError::WriteError { file } => {
                 write!(fmt, "Error writing to file '{}'.", file)
             },
-            PkgError::MkdirError { path } => {
-                write!(fmt, "Error creating directory '{}'.", path)
+            PkgError::MkdirError => {
+                write!(fmt, "Error creating root temporary directory.")
             },
             PkgError::NoProgramEntry { name } => {
                 write!(fmt, "No entry address for program '{}'.", name)
