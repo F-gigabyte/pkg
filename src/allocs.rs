@@ -54,70 +54,55 @@ impl MemMap {
 
     /// Allocates a region of memory  
     /// The size of the allocation is the `size` attribute of `alloc`  
-    /// Uses best fit as the allocation strategy  
+    /// Uses first fit as the allocation strategy  
     /// `alloc` is the allocation requirements  
     /// On success returns the address allocated while on error a `PkgError` is returned
     fn allocate(&mut self, alloc: &Alloc) -> Result<usize, PkgError> {
-        let mut suggest = None;
-        let mut overflow = 0;
         for i in 0..self.regions.len() {
             if self.regions[i].region == "free" {
                 let lower = (self.regions[i].lower + alloc.alignment - 1) & !(alloc.alignment - 1);
                 if lower < self.regions[i].upper {
                     let size = self.regions[i].upper - lower;
+                    let mut i = i;
                     if size >= alloc.size {
-                        let region_overflow = size - alloc.size;
-                        if let Some(_) = suggest {
-                            if region_overflow < overflow {
-                                suggest = Some(i);
-                                overflow = region_overflow;
-                            }
-                        } else {
-                            suggest = Some(i);
-                            overflow = region_overflow;
+                        let upper = lower + alloc.size;
+                        if lower != self.regions[i].lower {
+                            self.regions.insert(
+                                i, 
+                                Block {
+                                    lower: self.regions[i].lower,
+                                    upper: lower,
+                                    region: "free".to_string()
+                                }
+                            );
+                            i += 1;
                         }
+                        if upper != self.regions[i].upper {
+                            self.regions.insert(
+                                i + 1, 
+                                Block {
+                                    lower: upper,
+                                    upper: self.regions[i].upper,
+                                    region: "free".to_string()
+                                }
+                            );
+                        }
+                        self.regions[i] = Block {
+                            lower,
+                            upper,
+                            region: format!("{}{} ({})", alloc.name, alloc.region, alloc.attr)
+                        };
+                        return Ok(lower);
                     }
                 }
             }
         }
-        if let Some(mut suggest) = suggest {
-            let lower = (self.regions[suggest].lower + alloc.alignment - 1) & !(alloc.alignment - 1);
-            let upper = lower + alloc.size;
-            if lower != self.regions[suggest].lower {
-                self.regions.insert(
-                    suggest, 
-                    Block {
-                        lower: self.regions[suggest].lower,
-                        upper: lower,
-                        region: "free".to_string()
-                    }
-                );
-                suggest += 1;
+        Err(
+            PkgError::NoSpace {
+                name: alloc.name.clone(),
+                region: alloc.region.clone() 
             }
-            if upper != self.regions[suggest].upper {
-                self.regions.insert(
-                    suggest + 1, 
-                    Block {
-                        lower: upper,
-                        upper: self.regions[suggest].upper,
-                        region: "free".to_string()
-                    }
-                );
-            }
-            self.regions[suggest] = Block {
-                lower,
-                upper,
-                region: format!("{}{} ({})", alloc.name, alloc.region, alloc.attr)
-            };
-            Ok(lower)
-        } else {
-            Err(
-                PkgError::NoSpace {
-                    name: alloc.name.clone(),
-                    region: alloc.region.clone() 
-                }
-            )
-        }
+        )
     }
 
     /// Reserves a section of memory, preventing it from being allocated  
