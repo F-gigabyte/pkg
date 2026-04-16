@@ -375,7 +375,6 @@ fn run() -> Result<(), PkgError> {
     // rename file sections
     for (file, (secs, symbols)) in renames {
         rename_file_sections(&args.env_args.objcopy, &root, &file, &secs, &symbols, &mut link_files)?;
-        // based on answer by embradded on https://stackoverflow.com/questions/68622938/new-versions-of-ld-cannot-take-elf-files-as-input-to-link accessed 11/02/2026
     }
     
     // display allocation memory map
