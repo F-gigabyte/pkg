@@ -275,7 +275,7 @@ pub fn get_file_regions(
                 }
             )?;
             let alignment = if kernel || load {
-                4
+                sec.sh_addralign(Endianness::Little) as usize
             } else {
                 size
             };
