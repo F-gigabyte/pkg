@@ -16,7 +16,7 @@
  * 
  */
 
-use std::{collections::HashSet, process::exit, sync::{LazyLock, Mutex}};
+use std::{collections::HashSet, sync::{LazyLock, Mutex}};
 
 use crate::driver_args::{DriverArgs, PAD_ANALOG, PAD_NORMAL, PAD_PULL_UP};
 

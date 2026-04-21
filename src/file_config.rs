@@ -81,7 +81,7 @@ pub struct ProgramConfig {
     /// Program priority
     pub priority: u8,
     /// Program's device to allocate
-    pub driver: Option<String>,
+    pub device: Option<String>,
     /// Program's pins to allocate
     pub pins: Option<Vec<u8>>,
     /// Number of synchronous queues this program has
@@ -102,7 +102,7 @@ pub struct LoadedConfig<'a> {
     /// The file name
     pub filename: String,
     /// The program's device
-    pub driver: u16,
+    pub device: u16,
     /// The program's pins to allocate
     pub pins: Option<Vec<u8>>,
     /// The program's hamming code block length

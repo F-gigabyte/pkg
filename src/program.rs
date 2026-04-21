@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use capitalize::Capitalize;
 
-use crate::{drivers::lookup_driver, errors::PkgError, region::Region};
+use crate::{devices::lookup_device, errors::PkgError, region::Region};
 
 /// Represents a program that will be in the program table
 #[derive(Debug)]
@@ -32,7 +32,7 @@ pub struct Program {
     /// The program's priority
     pub priority: u8,
     /// The program's device
-    pub driver: u16,
+    pub device: u16,
     /// The program's interrupts
     pub inter: [u8; 4],
     /// The program's stack region
@@ -76,13 +76,13 @@ static PID: AtomicU32 = AtomicU32::new(0);
 impl Program {
     /// Priority shift
     const PRIORITY_SHIFT: usize = 0;
-    /// Driver shift
-    const DRIVER_SHIFT: usize = 16;
+    /// Device shift
+    const DEVICE_SHIFT: usize = 16;
 
     /// Priority mask
     const PRIORITY_MASK: u32 = 0xff << Self::PRIORITY_SHIFT;
-    /// Driver mask
-    const DRIVER_MASK: u32 = 0xffff << Self::DRIVER_SHIFT;
+    /// Device mask
+    const DEVICE_MASK: u32 = 0xffff << Self::DEVICE_SHIFT;
     /// No interrupt
     const INTERRUPT_NONE: u8 = 0xff;
 
@@ -103,7 +103,7 @@ impl Program {
     /// Creates a new `Program`  
     /// `name` is the program name  
     /// `priority` is the program's priority  
-    /// `driver` is the program's device  
+    /// `device` is the program's device  
     /// `inter` is a list of the program's interrupts  
     /// `num_sync_queues` is the number of synchronous queues this program has  
     /// `num_sync_endpoints` is the number of synchronous endpoints this program has  
@@ -117,7 +117,7 @@ impl Program {
     pub fn new(
         name: String,
         priority: u8,
-        driver: u16,
+        device: u16,
         inter: [u8; 4],
         num_sync_queues: u8,
         num_sync_endpoints: u32,
@@ -134,7 +134,7 @@ impl Program {
             pid: PID.fetch_add(1, Ordering::Acquire),
             name, 
             priority, 
-            driver, 
+            device, 
             inter, 
             sp: None, 
             entry: None, 
@@ -181,7 +181,7 @@ impl Program {
     pub fn serialise(&self) -> Result<Vec<u8>, PkgError> {
         let mut res = Vec::new();
         res.extend_from_slice(&(self.pid.to_le_bytes()));
-        res.extend_from_slice(&(((self.priority as u32) << Self::PRIORITY_SHIFT) | ((self.driver as u32) << Self::DRIVER_SHIFT)).to_le_bytes());
+        res.extend_from_slice(&(((self.priority as u32) << Self::PRIORITY_SHIFT) | ((self.device as u32) << Self::DEVICE_SHIFT)).to_le_bytes());
         res.extend_from_slice(&self.inter);
         res.extend_from_slice(&self.sp.ok_or(
                 PkgError::NoProgramStack {
@@ -222,8 +222,8 @@ impl Program {
         println!("{}{}", indent, self.name.capitalize());
         println!("{}\tPID: {}", indent, self.pid);
         println!("{}\tPriority: {}", indent, self.priority);
-        if self.driver != 0 {
-            println!("{}\tDriver: {} ({})", indent, self.driver, lookup_driver(self.driver).unwrap());
+        if self.device != 0 {
+            println!("{}\tDevice: {} ({})", indent, self.device, lookup_device(self.device).unwrap());
         }
         for (i, inter) in self.inter.iter().enumerate() {
             if *inter != 0xff {

@@ -18,7 +18,7 @@
 
 use std::{cmp::Ordering, collections::{HashMap, VecDeque}};
 
-use crate::{Section, device_args::DriverArgs, errors::PkgError, program::Program, region::Region, region_attr::RegionAttr};
+use crate::{Section, driver_args::DriverArgs, errors::PkgError, program::Program, region::Region, region_attr::RegionAttr};
 
 /// Kernel bootloader address
 const BOOTLOADER_ADDR: usize = 0x10000000;

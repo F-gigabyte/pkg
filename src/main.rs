@@ -16,14 +16,14 @@
  * 
  */
 
-use std::{cmp::Ordering, collections::HashMap, env, fs::{self, File, read_dir}, io::Read, path::Path, process::{Command, exit}};
+use std::{cmp::Ordering, collections::HashMap, fs::{self, File, read_dir}, io::Read, path::Path, process::{Command, exit}};
 
 use object::read::elf::ElfFile;
 
 use ansi_term::Color::Red;
 use tempfile::TempDir;
 
-use crate::{allocs::{MemMap, add_error_codes, default_allocs, do_allocs}, args::Args, cmds::check_cmd, driver_args::DriverArgs, drivers::{DriverError, PinError, find_driver, take_pins}, elf::{add_final_args_and_crcs, get_file_regions}, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
+use crate::{allocs::{MemMap, add_error_codes, default_allocs, do_allocs}, args::Args, cmds::check_cmd, devices::{DeviceError, PinError, find_device, take_pins}, driver_args::DriverArgs, elf::{add_final_args_and_crcs, get_file_regions}, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
 
 pub mod devices;
 pub mod queues;
@@ -182,40 +182,40 @@ fn run() -> Result<(), PkgError> {
         // get program regions and device information
         let mut regions = [const { Region::default() }; 8];
         let inter;
-        let driver_num;
+        let device_num;
         let mut pin_mask = 0;
-        if let Some(driver_name) = &program_config.driver {
-            let driver = find_driver(driver_name).map_err(|err| {
+        if let Some(device_name) = &program_config.device {
+            let device = find_device(device_name).map_err(|err| {
                 match err {
-                    DriverError::Invalid => {
-                        PkgError::InvalidDriver {
+                    DeviceError::Invalid => {
+                        PkgError::InvalidDevice {
                             name: program_config.name.to_string(), 
-                            driver: driver_name.to_string()
+                            device: device_name.to_string()
                         }
                     },
-                    DriverError::Taken => {
-                        PkgError::DriverTaken {
+                    DeviceError::Taken => {
+                        PkgError::DeviceTaken {
                             name: program_config.name.to_string(), 
-                            driver: driver_name.to_string()
+                            device: device_name.to_string()
                         }
                     }
                 }
             })?; 
             let empty_pins = vec![];
             let pins = program_config.pins.as_ref().unwrap_or(&empty_pins);
-            take_pins(&mut driver_args, &pins, &driver).map_err(|err| {
+            take_pins(&mut driver_args, &pins, &device).map_err(|err| {
                 match err {
                     PinError::Taken(taken) => {
                         PkgError::PinsTaken { 
                             name: program_config.name.to_string(), 
-                            driver: driver_name.to_string(), 
+                            device: device_name.to_string(), 
                             pins: taken 
                         }
                     },
                     PinError::Invalid(invalid) => {
                         PkgError::InvalidPins { 
                             name: program_config.name.to_string(), 
-                            driver: driver_name.to_string(), 
+                            device: device_name.to_string(), 
                             pins: invalid 
                         }
                     }
@@ -227,20 +227,20 @@ fn run() -> Result<(), PkgError> {
             regions[0] = Region { 
                 name: None,
                 phys_addr: 0, 
-                virt_addr: driver.base, 
-                len: ((driver.len * 4).ilog2() - 1) << Region::LEN_SHIFT | 
+                virt_addr: device.base, 
+                len: ((device.len * 4).ilog2() - 1) << Region::LEN_SHIFT | 
                     Region::ENABLE_MASK | 
                     ((RegionAttr::RW as u32) << Region::PERM_SHIFT) 
                     | Region::DEVICE_MASK
                     | Region::VIRTUAL_MASK, 
-                actual_len: driver.len * 4,
+                actual_len: device.len * 4,
                 codes: 0,
             };
-            inter = driver.inter;
-            driver_num = driver.num;
+            inter = device.inter;
+            device_num = device.num;
         } else {
             inter = [0xff; 4];
-            driver_num = 0;
+            device_num = 0;
         };
 
         // check queue lengths are valid
@@ -267,7 +267,7 @@ fn run() -> Result<(), PkgError> {
         let program = Program::new(
             program_config.name.to_string(),
             program_config.priority, 
-            driver_num,
+            device_num,
             inter,
             program_config.num_sync_queues,
             u32::try_from(program_config.sync_endpoints.len()).map_err(|_| 
@@ -317,7 +317,7 @@ fn run() -> Result<(), PkgError> {
             }
         )?;
 
-        file_data.insert(program_config.name, (filename, driver_num, program_config.pins, start, data.len(), program_config.block_len));
+        file_data.insert(program_config.name, (filename, device_num, program_config.pins, start, data.len(), program_config.block_len));
     }
 
     println!("Have pin functions {:#?}", driver_args.pin_func);
@@ -328,7 +328,7 @@ fn run() -> Result<(), PkgError> {
     let queues = queue_requirements.get_queues();
 
     let mut files = HashMap::new();
-    for (name, (filename, driver, pins, start, end, block_len)) in file_data {
+    for (name, (filename, device, pins, start, end, block_len)) in file_data {
         let data = ElfFile::parse(&data[start..end]).map_err(|_| 
             PkgError::ReadError {
                 file: filename.to_string()
@@ -336,7 +336,7 @@ fn run() -> Result<(), PkgError> {
         )?;
         files.insert(name.to_string(), LoadedConfig {
             filename: filename.to_string(),
-            driver: driver,
+            device: device,
             pins,
             data,
             block_len: block_len
@@ -428,9 +428,9 @@ fn run() -> Result<(), PkgError> {
     }
     // sort programs by device
     programs.sort_by(|p1, p2| -> Ordering {
-        if p1.driver > p2.driver {
+        if p1.device > p2.device {
             Ordering::Greater
-        } else if p1.driver == p2.driver {
+        } else if p1.device == p2.device {
             Ordering::Equal
         } else {
             Ordering::Less

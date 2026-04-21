@@ -16,7 +16,7 @@
  * 
  */
 
-use std::{cmp::Ordering, collections::{HashMap, HashSet}, fs, mem, path::Path, process::Command};
+use std::{cmp::Ordering, collections::{HashMap, HashSet}, fs, mem, process::Command};
 
 use tempfile::TempDir;
 

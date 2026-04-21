@@ -94,25 +94,25 @@ pub enum PkgError {
         name: String
     },
     /// Device doesn't exist
-    InvalidDriver {
+    InvalidDevice {
         name: String, 
-        driver: String
+        device: String
     },
     /// Device has already been allocated
-    DriverTaken {
+    DeviceTaken {
         name: String, 
-        driver: String
+        device: String
     },
     /// Invalid pins were specified
     InvalidPins {
         name: String,
-        driver: String,
+        device: String,
         pins: Vec<u8>
     },
     /// Pins have already been allocated
     PinsTaken {
         name: String,
-        driver: String,
+        device: String,
         pins: Vec<u8>
     },
     /// This program has the same name as a previous program
@@ -196,32 +196,32 @@ impl fmt::Display for PkgError {
             PkgError::InvalidRegionPermissions { name, region, flags } => {
                 write!(fmt, "Invalid region permissions for {} region {} of '{}'.", name, region, flags)
             },
-            PkgError::InvalidDriver { name, driver } => {
-                write!(fmt, "Invalid driver for {} of '{}'.", name, driver)
+            PkgError::InvalidDevice { name, device } => {
+                write!(fmt, "Invalid device for {} of '{}'.", name, device)
             },
-            PkgError::DriverTaken { name, driver } => {
-                write!(fmt, "Repeated driver for {} of '{}'.", name, driver)
+            PkgError::DeviceTaken { name, device } => {
+                write!(fmt, "Repeated device for {} of '{}'.", name, device)
             },
-            PkgError::InvalidPins { name, driver, pins } => {
+            PkgError::InvalidPins { name, device, pins } => {
                 assert!(pins.len() > 0);
                 if pins.len() == 1 {
-                    write!(fmt, "Invalid pin for {} with driver {} of '{}'.", name, driver, pins.first().unwrap())
+                    write!(fmt, "Invalid pin for {} with device {} of '{}'.", name, device, pins.first().unwrap())
                 } else {
                     assert!(pins.len() >= 2);
-                    write!(fmt, "Invalid pins for {} with driver {} of ", name, driver)?;
+                    write!(fmt, "Invalid pins for {} with device {} of ", name, device)?;
                     for i in 0..pins.len() - 2 {
                         write!(fmt, "'{}', ", pins[i])?;
                     }
                     write!(fmt, "'{}' and '{}'.", pins[pins.len() - 2], pins[pins.len() - 1])
                 }
             },
-            PkgError::PinsTaken { name, driver, pins } => {
+            PkgError::PinsTaken { name, device, pins } => {
                 assert!(pins.len() > 0);
                 if pins.len() == 1 {
-                    write!(fmt, "Repeated pin for {} with driver {} of '{}'.", name, driver, pins.first().unwrap())
+                    write!(fmt, "Repeated pin for {} with device {} of '{}'.", name, device, pins.first().unwrap())
                 } else {
                     assert!(pins.len() >= 2);
-                    write!(fmt, "Repeated pins for {} with driver {} of ", name, driver)?;
+                    write!(fmt, "Repeated pins for {} with device {} of ", name, device)?;
                     for i in 0..pins.len() - 2 {
                         write!(fmt, "'{}', ", pins[i])?;
                     }
