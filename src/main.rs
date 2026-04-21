@@ -25,7 +25,7 @@ use tempfile::TempDir;
 
 use crate::{allocs::{MemMap, add_error_codes, default_allocs, do_allocs}, args::Args, cmds::check_cmd, driver_args::DriverArgs, drivers::{DriverError, PinError, find_driver, take_pins}, elf::{add_final_args_and_crcs, get_file_regions}, errors::PkgError, file_config::{Endpoint, FileConfig, LoadedConfig}, program::Program, queues::QueueRequirements, region::Region, region_attr::RegionAttr, sections::{Section, create_link_file, print_renames, rename_file_sections}};
 
-pub mod drivers;
+pub mod devices;
 pub mod queues;
 pub mod section_attr;
 pub mod region_attr;
