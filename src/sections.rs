@@ -103,7 +103,8 @@ pub fn create_link_file(
             "{}
             \t{} 0x{:x} : AT(0x{:x}) {{
             \t\t*({});
-            \t}}
+                . = ALIGN(4);
+            \t}} =0xffff
             \t__{}_phys_start = LOADADDR({});
             \t__{}_phys_end = LOADADDR({}) + SIZEOF({});
             \t__{}_virt_start = ADDR({});
