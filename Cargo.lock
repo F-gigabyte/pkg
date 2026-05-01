@@ -140,7 +140,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 [[package]]
 name = "crc32"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/crc32.git#7522524417ae2b9b7770b955ecc32383bca5d081"
+source = "git+ssh://git@github.com/F-gigabyte/crc32.git#00d08eec5b76204276720cc5185374f1f2ab2ec7"
 
 [[package]]
 name = "crc32fast"
@@ -205,7 +205,7 @@ dependencies = [
 [[package]]
 name = "hamming"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/hamming.git#5c5e65b0290c7ae76181e205495b72ae0012d98d"
+source = "git+ssh://git@github.com/F-gigabyte/hamming.git#cc5b66256f1f3540f2bce0294364e951bb253e18"
 dependencies = [
  "crc32",
 ]
@@ -269,9 +269,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.185"
+version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
+checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "linux-raw-sys"
